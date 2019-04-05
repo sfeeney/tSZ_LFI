@@ -4,6 +4,7 @@ from scipy.integrate import trapz
 from colossus.halo import mass_adv
 from colossus.halo import mass_so
 import time
+from numba import jit
 
 # Auxiliary functions (window function related) #{{{
 def W(x):
@@ -158,6 +159,7 @@ def dndM(M, z, numerics, cosmology):#{{{
 def d2(M, z, numerics, cosmology):
     d3 = dndM(M, z, numerics, cosmology)
     return (((cosmology['cosmo_object'].comoving_distance(z)).value)*cosmology['h'])**2. * ((cosmology['cosmo_object'].H(z)).value/(cosmology['c0']*cosmology['h']))**(-1.) * d3
+
 def Mint_d2(Mlow, Mhigh, z, numerics, cosmology):
     logM_grid = np.linspace(np.log10(Mlow), np.log10(Mhigh), num = 5)
     integrand_grid = np.zeros(len(logM_grid))
@@ -165,6 +167,7 @@ def Mint_d2(Mlow, Mhigh, z, numerics, cosmology):
         M = 10.**logM_grid[ii]
         integrand_grid[ii] = M * np.log(10) * d2(M, z, numerics, cosmology)
     return trapz(integrand_grid, x = logM_grid)
+
 def zint_d2(Mlow, Mhigh, zlow, zhigh, numerics, cosmology):
     z_grid = np.linspace(zlow, zhigh, num = 5)
     integrand_grid = np.zeros(len(z_grid))
@@ -175,15 +178,15 @@ def zint_d2(Mlow, Mhigh, zlow, zhigh, numerics, cosmology):
 #}}}
 
 #################################
-###### Map making functions #####
+####### Physics functions #######
 #################################
 # ( only these functions should be called from outside )
 def map_generate_dndOmega(numerics, cosmology, path):#{{{
     dndOmega = np.zeros((numerics['map_Npoints_M'], numerics['map_Npoints_z']))
     for ii in xrange(numerics['map_Npoints_M']):
         start = time.time()
-        for jj in xrange(numerics['map_Npoints_z']):
-            dndOmega[ii,jj] = zint_d2(
+        iterable = (
+            zint_d2(
                     10.**numerics['map_logM_boundaries'][ii],
                     10.**numerics['map_logM_boundaries'][ii+1],
                     numerics['map_z_boundaries'][jj],
@@ -191,6 +194,9 @@ def map_generate_dndOmega(numerics, cosmology, path):#{{{
                     numerics,
                     cosmology
                     )
+            for jj in xrange(numerics['map_Npoints_z'])
+            )
+        dndOmega[ii, :] = np.fromiter(iterable, float, count = numerics['map_Npoints_z'])
         end = time.time()
         if numerics['verbose'] :
             print str((numerics['map_Npoints_M']-ii)*(end-start)/60.) + ' minutes remaining in map_generate_dndOmega'

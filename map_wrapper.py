@@ -73,7 +73,7 @@ numerical_parameters = {
         # Text file containing the noise power spectrum
         #   assumed to have 2 columns, the 1st one is ell, the second one Cell
         # TODO
-        'noise_power_spectrum_file': 'TODO',
+        'noise_power_spectrum_file': 'TODO.txt',
 
         # some integration boundaries, should not need any changing
         'k_max': 100,
