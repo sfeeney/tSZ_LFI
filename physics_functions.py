@@ -135,14 +135,14 @@ def hmf_Tinker2008(sigma):
 def sigma(M, z, numerics, cosmology):#{{{
     RM = (3. * M / (4. * np.pi * cosmology['rhoM'] ) )**(1./3.)
     integrand = lambda k : (1./(2.*np.pi**2))*( k**2 * cosmology['PK'](z, k) * (W(k*RM))**2 )
-    sigmasq, err = quad(integrand, numerics['k_min'], numerics['k_max'], limit = 100)
+    sigmasq, err = quad(integrand, numerics['k_min'], numerics['k_max'], limit = 100, epsrel = 1e-3)
     return np.sqrt(sigmasq)
 #}}}
 def chi_integral(M, z, numerics, cosmology):#{{{
     # computes the chi-integral [which is close to the derivative of sigma] at z = 0
     RM = (3. * M / (4. * np.pi * cosmology['rhoM'] ) )**(1./3.)
     integrand = lambda lk : (1.*np.log(10.)/np.pi**2)*( (10.**(lk))**3 * cosmology['PK'](z, (10.**lk)) * W((10.**lk)*RM) * chi((10.**lk)*RM) )
-    integral, err = quad(integrand, np.log10(numerics['k_min']), np.log10(numerics['k_max']), limit = 100)
+    integral, err = quad(integrand, np.log10(numerics['k_min']), np.log10(numerics['k_max']), limit = 100, epsrel = 1e-3)
     return integral
 #}}}
 def dndM(M, z, numerics, cosmology):#{{{
@@ -159,22 +159,17 @@ def dndM(M, z, numerics, cosmology):#{{{
 def d2(M, z, numerics, cosmology):
     d3 = dndM(M, z, numerics, cosmology)
     return (((cosmology['cosmo_object'].comoving_distance(z)).value)*cosmology['h'])**2. * ((cosmology['cosmo_object'].H(z)).value/(cosmology['c0']*cosmology['h']))**(-1.) * d3
-
+vectorized_d2 = np.vectorize(d2, cache = True)
 def Mint_d2(Mlow, Mhigh, z, numerics, cosmology):
     logM_grid = np.linspace(np.log10(Mlow), np.log10(Mhigh), num = 5)
-    integrand_grid = np.zeros(len(logM_grid))
-    for ii in xrange(len(logM_grid)):
-        M = 10.**logM_grid[ii]
-        integrand_grid[ii] = M * np.log(10) * d2(M, z, numerics, cosmology)
+    integrand_grid = 10.**logM_grid*np.log(10.)*vectorized_d2(10.**logM_grid, z, numerics, cosmology)
     return trapz(integrand_grid, x = logM_grid)
-
+vectorized_Mint_d2 = np.vectorize(Mint_d2, cache = True)
 def zint_d2(Mlow, Mhigh, zlow, zhigh, numerics, cosmology):
     z_grid = np.linspace(zlow, zhigh, num = 5)
-    integrand_grid = np.zeros(len(z_grid))
-    for ii in xrange(len(z_grid)):
-        z = z_grid[ii]
-        integrand_grid[ii] = Mint_d2(Mlow, Mhigh, z, numerics, cosmology)
+    integrand_grid = vectorized_Mint_d2(Mlow, Mhigh, z_grid, numerics, cosmology)
     return trapz(integrand_grid, x = z_grid)
+vectorized_zint_d2 = np.vectorize(zint_d2, cache = True)
 #}}}
 
 #################################
@@ -185,18 +180,14 @@ def map_generate_dndOmega(numerics, cosmology, path):#{{{
     dndOmega = np.zeros((numerics['map_Npoints_M'], numerics['map_Npoints_z']))
     for ii in xrange(numerics['map_Npoints_M']):
         start = time.time()
-        iterable = (
-            zint_d2(
-                    10.**numerics['map_logM_boundaries'][ii],
-                    10.**numerics['map_logM_boundaries'][ii+1],
-                    numerics['map_z_boundaries'][jj],
-                    numerics['map_z_boundaries'][jj+1],
-                    numerics,
-                    cosmology
-                    )
-            for jj in xrange(numerics['map_Npoints_z'])
-            )
-        dndOmega[ii, :] = np.fromiter(iterable, float, count = numerics['map_Npoints_z'])
+        dndOmega[ii, :] = vectorized_zint_d2(
+                                10.**numerics['map_logM_boundaries'][ii],
+                                10.**numerics['map_logM_boundaries'][ii+1],
+                                numerics['map_z_boundaries'][:-1],
+                                numerics['map_z_boundaries'][1:],
+                                numerics,
+                                cosmology
+                                )
         end = time.time()
         if numerics['verbose'] :
             print str((numerics['map_Npoints_M']-ii)*(end-start)/60.) + ' minutes remaining in map_generate_dndOmega'
