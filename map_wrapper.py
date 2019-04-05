@@ -6,17 +6,20 @@ numerical_parameters = {
 
         # set this to True if you want to generate dndOmega and the y-profiles
         # then some non-standard packages will be required
+        # TODO
         'do_physics': True,
         
         
         # set this to true if you have already generated dndOmega and the y-profiles
         # then only maps can be generated using this data
+        # TODO
         'do_maps': True,
         
         # do you want the code to pester you with printouts?
         'verbose': True,
         
         # angular sidelength of the final map in radians
+        # TODO
         'map_size': 20.*np.pi/180,
 
         # the code takes only a fraction of the final map in order to get rid of edge effects.
@@ -25,16 +28,19 @@ numerical_parameters = {
         'map_fraction': 0.8,
 
         # pixel sidelength in radians
+        # TODO
         'map_pixel_size': 0.5/60.*np.pi/180,
 
         # parameters for the mass grid
         #   for the mass definition see the cosmology parameters below
         #   NOTE : all units are "h-units", i.e. [M] = M_sun/h etc.
+        # TODO
         'map_logM_min': 11.,
         'map_logM_max': 16.,
         'map_Npoints_M': 50,
         
         # parameters for the redshift grid
+        # TODO
         'map_z_min': 0.005,
         'map_z_max': 6.,
         'map_Npoints_z': 51,
@@ -48,7 +54,7 @@ numerical_parameters = {
         # whether to choose the number of clusters according to the Poisson distribution
         #   if set to False, the distribution given in arXiv:1812.05584 pg 6 IV A is used
         # should be set to True if all moments are needed (False produces only the correct average)
-        'map_Poisson': False,
+        'map_Poisson': True,
 
         # Fit function for the halo mass function
         # currently, only 'Tinker10' and 'Tinker08' are available
@@ -66,6 +72,7 @@ numerical_parameters = {
 
         # Text file containing the noise power spectrum
         #   assumed to have 2 columns, the 1st one is ell, the second one Cell
+        # TODO
         'noise_power_spectrum_file': 'TODO',
 
         # some integration boundaries, should not need any changing
@@ -90,6 +97,7 @@ if numerical_parameters['do_maps'] :
 cosmology_parameters = {
         
         # Standard cosmology parameters
+        # TODO
         'H0': 70.,# km/s/Mpc
         'h': 0.7,# "little h" if needed
         'Om0': 0.25,# dimensionless (total) matter density
@@ -109,6 +117,7 @@ cosmology_parameters = {
         'kBoltzmann':1.38064852e-23,
 
         # Observation frequency, required to convert Compton-y to temperature decrement
+        # TODO
         'frequency': 148e9, # Hertz
 
         # Mass definition of the mass grid
@@ -169,6 +178,7 @@ def computations() :#{{{
         # I'm assuming these files to loook similar to those Colin linked to,
         # i.e. the first column contains ell, and some other column contains
         # noise power in Compton-y^2
+        # TODO : there might be an issue with the factor ell*(ell+1)/2*pi here!
         ell, Cell = np.loadtxt(numerical_parameters['noise_power_spectrum_file'], unpack = True, usecols = (0,1), comments = '#')
         Cell_interpolator = interp1d(ell, Cell, bounds_error = False, fill_value = 0.)
         cosmology_parameters['noise_power'] = Cell_interpolator
@@ -262,7 +272,7 @@ if numerical_parameters['do_physics'] :
 
 if numerical_parameters['do_maps'] :
 
-    Nmaps = 1 # how many maps you want to generate
+    Nmaps = 10 # how many maps you want to generate
     for ii in xrange(Nmaps) :
         map_functions.map_generate_final_map(numerical_parameters, cosmology_parameters, path, ii)
         # generates a single map and stores as 'final_map_ii.npz' in 'path'
