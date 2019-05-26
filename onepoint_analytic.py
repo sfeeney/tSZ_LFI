@@ -454,7 +454,7 @@ class cosmology(object) :#{{{
                 self.bias_arr[ii,jj] = cosmology.__bz_Tinker2010(cosmology.delta_c/sigma)
             end = time()
             if (ii%4 == 0) and numerics.verbose :
-                print str((end-start)/60.*(self.num.Npoints_M-ii)) + ' minutes remaining in create_HMF_and_bias.'
+                print str((end-start)/60.*(Npoints_M-ii)) + ' minutes remaining in create_HMF_and_bias.'
         np.savez(
             path + 'HMF_and_bias.npz',
             hmf = self.hmf_arr,
@@ -536,7 +536,7 @@ class profiles(object) :#{{{
                 out_grid[ii] =  y_norm * integral * 2.
         return out_grid
     #}}}
-    def __generate_profile(self, M, z, DHT_dict={None}) :#{{{
+    def __generate_profile(self, M, z) :#{{{
         H = self.cosmo.H(z)
         d_A = self.cosmo.angular_diameter_distance(z)
         rvir = self.cosmo.virial_radius(M, z, self.cosmo.mass_def_initial)
@@ -586,7 +586,6 @@ class profiles(object) :#{{{
                 self.theta_out_arr[ii,jj], self.signal_arr[ii,jj] = self.__generate_profile(
                     10.**self.num.logM_grid[ii],
                     self.num.z_grid[jj],
-                    DHT_dict
                     )
             end = time()
             if (ii%4 == 0) and self.num.verbose :
@@ -673,9 +672,6 @@ class profiles(object) :#{{{
                     Window *= quadratic_pixel_window_function(self.num.scaled_reci_theta_grid*0.5*self.num.pixel_sidelength/self.theta_out_arr[ii,jj])
                 else :
                     warn('You called create_convolved_profiles without actually convolving', UserWarning)
-                if self.num.empirical_bl_fct is not None :
-                    Window_empirical = self.num.empirical_bl_fct(self.num.scaled_reci_theta_grid/self.theta_out_arr[ii,jj])
-                    Window *= Window_empirical
                 if self.num.gaussian_kernel_FWHM is not None :
                     Window *= profiles._gaussian_pixel_window_function(self.num.scaled_reci_theta_grid*self.num.gaussian_kernel_FWHM/self.theta_out_arr[ii,jj])
                 reci_signal = reci_signal * Window
@@ -920,11 +916,17 @@ if __name__ == '__main__' :#{{{
         # that you're actually interested in.
         'signal_max': 300e-6,
 
+        # number of datapoints at which you want to know the PDF
+        # the default value is overkill, but runtime is not a problem.
+        # choose this as a power of 2, since a lot of FFTs are being done!
+        'Npoints_signal': 2**17,
+
         # sidelength of the quadratic pixels in radians.
         # note that the pixelisation is only self-consistent at power-spectrum level.
         'pixel_sidelength': (np.pi/180.)*0.41/60.,
         }
         )
+
     cosmo.create_HMF_and_bias(path, num)
     pr = profiles(cosmo, num)
     pr.create_profiles(path)
