@@ -15,6 +15,10 @@ def chi(x):
     # the chi function [derivative of the window function]
     return ( (x**2 - 3.)*np.sin(x) + 3.*x*np.cos(x) ) / x**3
 #}}}
+def D(z, cosmology):
+    # computes the growth function
+    k = 0.01 # arbitrary choice
+    return np.sqrt(cosmology['PK'](z, k) / cosmology['PK'](0., k))
 
 #################################
 ## Mass definition conversions ##
@@ -132,6 +136,18 @@ def hmf_Tinker2008(sigma):
     g = 1.228
     return B*((sigma/e)**(-d) + sigma**(-f)) * np.exp(-g/sigma**2.)
 #}}}
+def bz_Tinker2010(nu, cosmology):#{{{
+    # Eq 6 of Tinker10, with parameters from Table 2
+    Delta = 200. # currently our value -- do we need to experiment with this?
+    y = np.log10(Delta)
+    A = 1.0 + 0.24 * y * np.exp( - (4./y)**4 )
+    a = 0.44 * y - 0.88
+    B  =0.183
+    b = 1.5
+    C = 0.019 + 0.107 * y + 0.19 * np.exp( - (4./y)**4 )
+    c = 2.4
+    return 1. - A*nu**a/(nu**a + cosmology['delta_c']**a) + B * nu**b + C * nu**c
+#}}}
 def sigma(M, z, numerics, cosmology):#{{{
     RM = (3. * M / (4. * np.pi * cosmology['rhoM'] ) )**(1./3.)
     integrand = lambda k : (1./(2.*np.pi**2))*( k**2 * cosmology['PK'](z, k) * (W(k*RM))**2 )
@@ -194,6 +210,21 @@ def map_generate_dndOmega(numerics, cosmology, path):#{{{
     # write to file
     np.savez(path + '/dndOmega.npz', dndOmega = dndOmega)
 #}}}
+def map_generate_bias(numerics, cosmology, path) :#{{{
+    if numerics['verbose'] :
+        print 'Generating bias'
+    bias_arr = np.zeros((numerics['map_Npoints_M'], numerics['map_Npoints_z']))
+    for ii in xrange(numerics['map_Npoints_M']) :
+        for jj in xrange(numerics['map_Npoints_z']) :
+            M = 0.5*(10.**numerics['map_logM_boundaries'][ii]+10.**numerics['map_logM_boundaries'][ii+1])
+            z = 0.5*(numerics['map_z_boundaries'][jj] + numerics['map_z_boundaries'][jj+1])
+            nu = cosmology['delta_c'] / sigma(M, z, numerics, cosmology)
+            bias_arr[ii,jj] = bz_Tinker2010(nu, cosmology)
+    np.savez(
+        path + '/bias.npz',
+        bias = bias_arr
+        )
+#}}}
 def map_generate_yprofiles(numerics, cosmology, path):#{{{
     yprofiles = [[[] for ii in xrange(numerics['map_Npoints_z'])] for jj in xrange(numerics['map_Npoints_M'])]
     thetas = [[[] for ii in xrange(numerics['map_Npoints_z'])] for jj in xrange(numerics['map_Npoints_M'])]
@@ -237,4 +268,29 @@ def map_generate_yprofiles(numerics, cosmology, path):#{{{
         if numerics['verbose'] :
             print str((numerics['map_Npoints_M']-ii)*(end-start)/60.) + ' minutes remaining in map_generate_yprofiles'
     np.savez(path + '/yprofiles.npz', thetas = thetas, yprofiles = yprofiles)
+#}}}
+
+#################################
+## Generate linear density Cls ## 
+#################################
+def map_generate_linear_density_Cells(numerics, cosmology, path) :#{{{
+    """
+    generates the Cells
+    """
+    if numerics['verbose'] :
+        print 'Generating linear density C_ell'
+    lmin = int(numerics['ell_min_scale'] * np.pi / numerics['map_size'])
+    lmax = int(numerics['ell_max_scale'] * np.pi / numerics['map_pixel_size'])
+    ell_arr = np.arange(lmin, lmax)
+    Cell_arr = np.zeros((len(ell_arr), numerics['map_Npoints_z']))
+    for ii in xrange(len(ell_arr)) :
+        for jj in xrange(numerics['map_Npoints_z']) :
+            integrand = lambda z: ((cosmology['cosmo_object'].H(z)).value/(cosmology['c0']*cosmology['h']))*cosmology['PK'](z, ell_arr[ii]/((cosmology['cosmo_object'].comoving_distance(z)).value*cosmology['h']))/((cosmology['cosmo_object'].comoving_distance(z)).value*cosmology['h'])**2.
+            #Cell_arr[ii,jj],err = quad(integrand, numerics['map_z_boundaries'][jj], numerics['map_z_boundaries'][jj+1])
+            Cell_arr[ii,jj] = integrand(0.5*(numerics['map_z_boundaries'][jj]+numerics['map_z_boundaries'][jj+1])) # integrate with delta function kernel, hopefully precise enough
+    np.savez(
+        path + '/linear_density_Cells.npz',
+        ell = ell_arr,
+        Cell = Cell_arr
+        )
 #}}}

@@ -20,7 +20,7 @@ numerical_parameters = {
         
         # angular sidelength of the final map in radians
         # TODO
-        'map_size': 20.*np.pi/180,
+        'map_size': 10.*np.pi/180,
 
         # the code takes only a fraction of the final map in order to get rid of edge effects.
         #   I didn't find an efficient way to implement period boundary conditions.
@@ -29,13 +29,13 @@ numerical_parameters = {
 
         # pixel sidelength in radians
         # TODO
-        'map_pixel_size': 0.5/60.*np.pi/180,
+        'map_pixel_size': 0.25/60.*np.pi/180,
 
         # parameters for the mass grid
         #   for the mass definition see the cosmology parameters below
         #   NOTE : all units are "h-units", i.e. [M] = M_sun/h etc.
         # TODO
-        'map_logM_min': 11.,
+        'map_logM_min': 13.,
         'map_logM_max': 16.,
         'map_Npoints_M': 50,
         
@@ -73,9 +73,17 @@ numerical_parameters = {
         # Text file containing the noise power spectrum
         #   assumed to have 2 columns, the 1st one is ell, the second one Cell
         # TODO
-        'noise_power_spectrum_file': 'TODO.txt',
+        'noise_power_spectrum_file': 'SO_LAT_Nell_T_goal_fsky0p4_ILC_tSZ.txt',
+
+        # whether you want to include the halo bias
+        # this computes the Cells of the linear density field
+        # currently a crude Limber-like approximation is employed, i.e. no correlations between different redshift bins are included
+        'map_include_bias': False,
+        'map_nonlinear_scale': 10., # Mpc/h
 
         # some integration boundaries, should not need any changing
+        'ell_min_scale': 1.,
+        'ell_max_scale': 0.1,
         'k_max': 100,
         'k_min': 1e-10
 
@@ -92,6 +100,9 @@ if numerical_parameters['do_physics'] :
 if numerical_parameters['do_maps'] :
     import map_functions
     from scipy.interpolate import interp1d
+    from astropy.cosmology import FlatLambdaCDM
+    import astropy.units as u
+    import pandas as pd
 
 # cosmology parameters #{{{
 cosmology_parameters = {
@@ -183,6 +194,39 @@ def computations() :#{{{
         Cell_interpolator = interp1d(ell, Cell, bounds_error = False, fill_value = 0.)
         cosmology_parameters['noise_power'] = Cell_interpolator
 
+        # Parameters for power spectrum calculation from maps
+        ell_max = 10000.
+        ell_min = 10.
+        N_bins = 1000
+        ell_boundaries = np.logspace(np.log10(ell_min), np.log10(ell_max), num = N_bins+1, base = 10.)
+        N_pixels = int(numerical_parameters['map_size']/numerical_parameters['map_pixel_size'])
+        exponent = int(np.ceil(np.log2(N_pixels)))
+        N_pixels = 2**exponent
+        ones = np.ones(N_pixels)
+        inds = (np.arange(N_pixels)+0.5-N_pixels/2.)/(N_pixels-1.)
+        kX = np.outer(ones,inds)/numerical_parameters['map_pixel_size']
+        kY = np.transpose(kX)
+        K = np.sqrt(kX**2.+kY**2.)
+        ell_scale_factor = 2.*np.pi
+        ell2d = (K*ell_scale_factor).flatten()
+        cut = pd.cut(ell2d, ell_boundaries, labels = False, include_lowest = True)
+        numerical_parameters['PS_pd_cut'] = cut
+        cutwithoutnans = np.sort(np.unique(cut[np.where(~np.isnan(cut))]))
+        ell_centres = (0.5*(ell_boundaries[:-1] + ell_boundaries[1:]))[cutwithoutnans.astype(int)]
+        numerical_parameters['PS_ell_centres'] = ell_centres
+        numerical_parameters['PS_Nbins'] = N_bins
+
+        # add an astropy object
+        cosmology_parameters['cosmo_object'] = FlatLambdaCDM(
+                H0=cosmology_parameters['H0'] * u.km / u.s / u.Mpc,
+                Tcmb0=cosmology_parameters['TCMB'] * u.K,
+                Om0=cosmology_parameters['Om0'],
+                Neff=cosmology_parameters['Neff'],
+                m_nu=cosmology_parameters['Mnu'] * u.eV,
+                Ob0=cosmology_parameters['Ob0'],
+                name='my_cosmology'
+                )
+
 
     if numerical_parameters['do_physics'] :
         # add an astropy object
@@ -231,6 +275,7 @@ def computations() :#{{{
                 hubble_units = PK_params['hubble_units'],
                 k_hunit = PK_params['k_hunit']
                 ).P
+
         pars.set_matter_power(redshifts = [0.], kmax = 20.)
         results = camb.get_results(pars)
         cosmology_parameters['sigma8'] = results.get_sigma8()[0]
@@ -253,40 +298,169 @@ def computations() :#{{{
         colossus_cosmology.setCosmology('cosmo_object', colossus_params)
 #}}}
 
-
+cosmology_parameters['As'] *= 1.1
+computations()
 #######################
 #### Usage example ####
 #######################
-path = 'test_maps' # the path where the maps will be stored
-os.system('mkdir ' + path)
 
-computations()
+Nmaps = 2000 # how many maps you want to generate
+if False :#{{{
+    path = 'compare_onepoint_PS/Om_middle' # the path where the maps will be stored
+    os.system('mkdir ' + path)
+    cosmology_parameters['Om0'] = 0.25
+    cosmology_parameters['As'] = 2.71826876e-9
+    computations()
+    if numerical_parameters['do_physics'] :
 
-if numerical_parameters['do_physics'] :
+        physics_functions.map_generate_dndOmega(numerical_parameters, cosmology_parameters, path)
+        # generates the 2D number density of sources and stores in 'path/dndOmega.npz'
 
-    physics_functions.map_generate_dndOmega(numerical_parameters, cosmology_parameters, path)
-    # generates the 2D number density of sources and stores in 'path/dndOmega.npz'
+        physics_functions.map_generate_yprofiles(numerical_parameters, cosmology_parameters, path)
+        # generates the y-profiles and stores in 'path/yprofiles.npz'
 
-    physics_functions.map_generate_yprofiles(numerical_parameters, cosmology_parameters, path)
-    # generates the y-profiles and stores in 'path/yprofiles.npz'
+        if numerical_parameters['map_include_bias'] :
+            physics_functions.map_generate_linear_density_Cells(numerical_parameters, cosmology_parameters, path)
+            physics_functions.map_generate_bias(numerical_parameters, cosmology_parameters, path)
 
-if numerical_parameters['do_maps'] :
+    if numerical_parameters['do_maps'] :
 
-    Nmaps = 10 # how many maps you want to generate
-    for ii in xrange(Nmaps) :
-        map_functions.map_generate_final_map(numerical_parameters, cosmology_parameters, path, ii)
-        # generates a single map and stores as 'final_map_ii.npz' in 'path'
-        # the .npz file contains a single square array, where each entry is a temperature in uK
-        #
-        # Note: the dndOmega and y-profile files need to exist in the same 'path' for this function to use them
-        #
-        # Note: the runtime of this function is dominated by the map_functions.throw_clusters function, which
-        #       is just array manipulation.
-        #       The usage of numba.jit is very helpful in keeping runtime reasonable.
+        for ii in xrange(Nmaps) :
+            map_functions.map_generate_final_map(numerical_parameters, cosmology_parameters, path, ii)
+            # generates a single map and stores as 'final_map_ii.npz' in 'path'
+            # the .npz file contains a single square array, where each entry is a temperature in uK
+            #
+            # Note: the dndOmega and y-profile files need to exist in the same 'path' for this function to use them
+            #
+            # Note: the runtime of this function is dominated by the map_functions.throw_clusters function, which
+            #       is just array manipulation.
+            #       The usage of numba.jit is very helpful in keeping runtime reasonable.
 
-        map_functions.map_generate_random_noise(numerical_parameters, cosmology_parameters, path, ii)
-        # generates a noise map of the same shape as the final map, at 'path/noise_ii.npz'
-        #   the noise power spectrum is read from the file 
-        #       numerical_parameters['noise_power_spectrum_file']
-        # Currently, the noise is not automatically added to the final map,
-        # this would allow to look at the effects of different noise levels.
+            #map_functions.map_generate_random_noise(numerical_parameters, cosmology_parameters, path, ii)
+            # generates a noise map of the same shape as the final map, at 'path/noise_ii.npz'
+            #   the noise power spectrum is read from the file 
+            #       numerical_parameters['noise_power_spectrum_file']
+            # Currently, the noise is not automatically added to the final map,
+            # this would allow to look at the effects of different noise levels.
+#}}}
+if False :#{{{
+    path = 'compare_onepoint_PS/Om_up' # the path where the maps will be stored
+    os.system('mkdir ' + path)
+    cosmology_parameters['Om0'] = 1.1*0.25
+    cosmology_parameters['As'] = 2.34e-9
+    computations()
+    if numerical_parameters['do_physics'] :
+
+        physics_functions.map_generate_dndOmega(numerical_parameters, cosmology_parameters, path)
+        # generates the 2D number density of sources and stores in 'path/dndOmega.npz'
+
+        physics_functions.map_generate_yprofiles(numerical_parameters, cosmology_parameters, path)
+        # generates the y-profiles and stores in 'path/yprofiles.npz'
+
+        if numerical_parameters['map_include_bias'] :
+            physics_functions.map_generate_linear_density_Cells(numerical_parameters, cosmology_parameters, path)
+            physics_functions.map_generate_bias(numerical_parameters, cosmology_parameters, path)
+
+    if numerical_parameters['do_maps'] :
+
+        for ii in xrange(Nmaps) :
+            map_functions.map_generate_final_map(numerical_parameters, cosmology_parameters, path, ii)
+            # generates a single map and stores as 'final_map_ii.npz' in 'path'
+            # the .npz file contains a single square array, where each entry is a temperature in uK
+            #
+            # Note: the dndOmega and y-profile files need to exist in the same 'path' for this function to use them
+            #
+            # Note: the runtime of this function is dominated by the map_functions.throw_clusters function, which
+            #       is just array manipulation.
+            #       The usage of numba.jit is very helpful in keeping runtime reasonable.
+
+            #map_functions.map_generate_random_noise(numerical_parameters, cosmology_parameters, path, ii)
+            # generates a noise map of the same shape as the final map, at 'path/noise_ii.npz'
+            #   the noise power spectrum is read from the file 
+            #       numerical_parameters['noise_power_spectrum_file']
+            # Currently, the noise is not automatically added to the final map,
+            # this would allow to look at the effects of different noise levels.
+#}}}
+if False :#{{{
+    path = 'compare_onepoint_PS/Om_down' # the path where the maps will be stored
+    os.system('mkdir ' + path)
+    cosmology_parameters['Om0'] = 0.9*0.25
+    cosmology_parameters['As'] = 3.245e-9
+    computations()
+    if numerical_parameters['do_physics'] :
+
+        physics_functions.map_generate_dndOmega(numerical_parameters, cosmology_parameters, path)
+        # generates the 2D number density of sources and stores in 'path/dndOmega.npz'
+
+        physics_functions.map_generate_yprofiles(numerical_parameters, cosmology_parameters, path)
+        # generates the y-profiles and stores in 'path/yprofiles.npz'
+
+        if numerical_parameters['map_include_bias'] :
+            physics_functions.map_generate_linear_density_Cells(numerical_parameters, cosmology_parameters, path)
+            physics_functions.map_generate_bias(numerical_parameters, cosmology_parameters, path)
+
+    if numerical_parameters['do_maps'] :
+
+        for ii in xrange(Nmaps) :
+            map_functions.map_generate_final_map(numerical_parameters, cosmology_parameters, path, ii)
+            # generates a single map and stores as 'final_map_ii.npz' in 'path'
+            # the .npz file contains a single square array, where each entry is a temperature in uK
+            #
+            # Note: the dndOmega and y-profile files need to exist in the same 'path' for this function to use them
+            #
+            # Note: the runtime of this function is dominated by the map_functions.throw_clusters function, which
+            #       is just array manipulation.
+            #       The usage of numba.jit is very helpful in keeping runtime reasonable.
+
+            #map_functions.map_generate_random_noise(numerical_parameters, cosmology_parameters, path, ii)
+            # generates a noise map of the same shape as the final map, at 'path/noise_ii.npz'
+            #   the noise power spectrum is read from the file 
+            #       numerical_parameters['noise_power_spectrum_file']
+            # Currently, the noise is not automatically added to the final map,
+            # this would allow to look at the effects of different noise levels.
+#}}}
+
+
+
+#######################
+###### With bias ######
+#######################
+
+#Nmaps = 100
+if False :#{{{
+    path = 'power_spectra' # the path where the maps will be stored
+    os.system('mkdir ' + path)
+    cosmology_parameters['As'] = 2.71826876e-9
+    computations()
+    if numerical_parameters['do_physics'] :
+
+        if numerical_parameters['map_include_bias'] :
+            physics_functions.map_generate_linear_density_Cells(numerical_parameters, cosmology_parameters, path)
+            physics_functions.map_generate_bias(numerical_parameters, cosmology_parameters, path)
+
+        physics_functions.map_generate_dndOmega(numerical_parameters, cosmology_parameters, path)
+        # generates the 2D number density of sources and stores in 'path/dndOmega.npz'
+
+        physics_functions.map_generate_yprofiles(numerical_parameters, cosmology_parameters, path)
+        # generates the y-profiles and stores in 'path/yprofiles.npz'
+
+    if numerical_parameters['do_maps'] :
+
+        for ii in xrange(Nmaps) :
+            map_functions.map_generate_final_map(numerical_parameters, cosmology_parameters, path, ii)
+            # generates a single map and stores as 'final_map_ii.npz' in 'path'
+            # the .npz file contains a single square array, where each entry is a temperature in uK
+            #
+            # Note: the dndOmega and y-profile files need to exist in the same 'path' for this function to use them
+            #
+            # Note: the runtime of this function is dominated by the map_functions.throw_clusters function, which
+            #       is just array manipulation.
+            #       The usage of numba.jit is very helpful in keeping runtime reasonable.
+
+            #map_functions.map_generate_random_noise(numerical_parameters, cosmology_parameters, path, ii)
+            # generates a noise map of the same shape as the final map, at 'path/noise_ii.npz'
+            #   the noise power spectrum is read from the file 
+            #       numerical_parameters['noise_power_spectrum_file']
+            # Currently, the noise is not automatically added to the final map,
+            # this would allow to look at the effects of different noise levels.
+#}}}
