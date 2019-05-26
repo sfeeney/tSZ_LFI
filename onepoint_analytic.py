@@ -26,10 +26,6 @@ from astropy import units as u
 from scipy.interpolate import RectBivariateSpline
 from pygsl import hankel as GSL_DHT
 
-# TODO : del all unused variables as soon as possible
-# TODO : write the save statements, as soon as the filename issue is solved
-# TODO : add checks about sizes etc at various places!
-
 def _set_param(input_dict, name, default) :
     return input_dict[name] if name in input_dict else default
 
@@ -469,8 +465,6 @@ class profiles(object) :#{{{
 
         self.cosmo = cosmo
         self.num = num
-        # TODO : read in profile params
-        # TODO : check whether tSZ/WL/...
         self.Sigma_crit = lambda z: 1.6625e18*cosmo.angular_diameter_distance(num.z_source)/cosmo.angular_diameter_distance(z)/cosmo.angular_diameter_distance_z1z2(z, num.z_source)
         self.theta_out_arr = None
         self.signal_arr = None
