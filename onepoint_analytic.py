@@ -668,21 +668,12 @@ class profiles(object) :#{{{
                     warn('You called create_convolved_profiles without actually convolving', UserWarning)
                 if self.num.gaussian_kernel_FWHM is not None :
                     Window *= profiles._gaussian_pixel_window_function(self.num.scaled_reci_theta_grid*self.num.gaussian_kernel_FWHM/self.theta_out_arr[ii,jj])
+                if self.convolve_with_Wiener :
+                    Window *= self.num.Wiener_filter(self.num.scaled_reci_theta_grid/self.theta_out_arr[ii,jj])
                 reci_signal = reci_signal * Window
                 _,self.convolved_signal_arr[ii,jj,:] = DHTobj.apply(reci_signal)
                 self.convolved_signal_arr[ii,jj,:] *= (self.num.scaled_reci_theta_grid[-1]**2.)
                 d = np.diff(self.convolved_signal_arr[ii,jj,:])
-                if np.any(np.isnan(self.convolved_signal_arr[ii,jj,:])) :
-                    print 'NAN'
-                    print ii,jj
-                    plt.plot(self.convolved_signal_arr[ii,jj,:])
-                    plt.plot(np.nan_to_num(self.convolved_signal_arr[ii,jj,:]))
-                    plt.show()
-                if np.any(d>=0) :
-                    print 'diff'
-                    plt.plot(d)
-                    plt.show()
-
             end = time()
             if (ii%4 == 0) and self.num.verbose :
                 print str((end-start)/60.*(self.signal_arr.shape[0]-ii)) + ' minutes remaining in create_convolved_profiles.'
@@ -880,8 +871,18 @@ if __name__ == '__main__' :#{{{
 #        'TCMB':
 #        }
         )
+
+    # CONSTRUCT THE WIENER FILTER
+    # --> you probably want to load this from file,
+    # this is just a minimal example
+    ell_arr = 10.**np.linspace(2., 4., num = 100)
+    Wiener = np.ones(len(ell_arr))
+    Wiener_interp = interp1d(ell_arr, Wiener, bounds_error = False, fill_value = 0.)
+
     num = numerics(
         {
+        'Wiener_filter': lambda ell: Wiener_interp(ell),
+
         # if this option is set to False, an error is thrown if you try
         # to compute something that already exists in path.
         'debugging': True,
