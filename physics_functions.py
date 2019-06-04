@@ -192,7 +192,7 @@ vectorized_zint_d2 = np.vectorize(zint_d2, cache = True)
 ####### Physics functions #######
 #################################
 # ( only these functions should be called from outside )
-def map_generate_dndOmega(numerics, cosmology, path):#{{{
+def map_generate_dndOmega(numerics, cosmology):#{{{
     dndOmega = np.zeros((numerics['map_Npoints_M'], numerics['map_Npoints_z']))
     for ii in xrange(numerics['map_Npoints_M']):
         start = time.time()
@@ -207,8 +207,7 @@ def map_generate_dndOmega(numerics, cosmology, path):#{{{
         end = time.time()
         if numerics['verbose'] :
             print str((numerics['map_Npoints_M']-ii)*(end-start)/60.) + ' minutes remaining in map_generate_dndOmega'
-    # write to file
-    np.savez(path + '/dndOmega.npz', dndOmega = dndOmega)
+    return dndOmega
 #}}}
 def map_generate_bias(numerics, cosmology, path) :#{{{
     if numerics['verbose'] :
@@ -225,7 +224,7 @@ def map_generate_bias(numerics, cosmology, path) :#{{{
         bias = bias_arr
         )
 #}}}
-def map_generate_yprofiles(numerics, cosmology, path):#{{{
+def map_generate_yprofiles(numerics, cosmology):#{{{
     yprofiles = [[[] for ii in xrange(numerics['map_Npoints_z'])] for jj in xrange(numerics['map_Npoints_M'])]
     thetas = [[[] for ii in xrange(numerics['map_Npoints_z'])] for jj in xrange(numerics['map_Npoints_M'])]
     # first index corresponds to M, second index to z
@@ -267,7 +266,7 @@ def map_generate_yprofiles(numerics, cosmology, path):#{{{
         end = time.time()
         if numerics['verbose'] :
             print str((numerics['map_Npoints_M']-ii)*(end-start)/60.) + ' minutes remaining in map_generate_yprofiles'
-    np.savez(path + '/yprofiles.npz', thetas = thetas, yprofiles = yprofiles)
+    return thetas, yprofiles
 #}}}
 
 #################################
