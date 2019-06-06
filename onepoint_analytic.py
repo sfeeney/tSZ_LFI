@@ -25,6 +25,7 @@ from astropy.cosmology import FlatLambdaCDM
 from astropy import units as u
 from scipy.interpolate import RectBivariateSpline
 from pygsl import hankel as GSL_DHT
+import pickle
 
 def _set_param(input_dict, name, default) :
     return input_dict[name] if name in input_dict else default
@@ -111,10 +112,12 @@ class cosmology(object) :#{{{
     hPl = 6.62607004e-34 # SI
     kBoltzmann = 1.38064852e-23 # SI
     def __init__(self, cosmo_dict = {None}) :#{{{
+        
+        print(cosmo_dict)
         # basic cosmology parameters
         self.h = _set_param(cosmo_dict, 'h', 0.7)
-        self.Om = _set_param(cosmo_dict, 'Om', 0.3)
-        self.Ob = _set_param(cosmo_dict, 'Ob', 0.046)
+        self.Om = _set_param(cosmo_dict, 'Om0', 0.3)
+        self.Ob = _set_param(cosmo_dict, 'Ob0', 0.046)
         self.As = _set_param(cosmo_dict, 'As', 2.1e-9)
         self.pivot_scalar = _set_param(cosmo_dict, 'pivot_scalar', 0.05/self.h)
         self.w = _set_param(cosmo_dict, 'w', -1)
@@ -122,6 +125,7 @@ class cosmology(object) :#{{{
         self.Mnu = _set_param(cosmo_dict, 'Mnu', 0.)
         self.Neff = _set_param(cosmo_dict, 'Neff', 0.)
         self.TCMB = _set_param(cosmo_dict, 'TCMB', 2.726)
+        self.P0 = _set_param(cosmo_dict, 'pressure_profile_P0', 18.1)
 
         # various definitions, should hopefully not need much change
         self.mass_def_initial = _set_param(cosmo_dict, 'mass_def_initial', '200m')
@@ -509,9 +513,10 @@ class profiles(object) :#{{{
     #}}}
     @staticmethod
     @jit(nopython = True, parallel = True)
-    def __y_profile(theta_grid, M200c, d_A, r200c, r_out, y_norm, theta_out, h, z) :#{{{
+    def __y_profile(theta_grid, M200c, d_A, r200c, r_out, y_norm, theta_out, h, z, P0) :#{{{
         out_grid = np.empty(len(theta_grid))
-        P0=18.1*(M200c/(1.e14*h))**(0.154)*(1.+z)**(-0.758)
+        #P0=18.1*(M200c/(1.e14*h))**(0.154)*(1.+z)**(-0.758)
+        P0=P0*(M200c/(1.e14*h))**(0.154)*(1.+z)**(-0.758)
         xc=0.497*(M200c/(1.e14*h))**(-0.00865)*(1.+z)**(0.731)
         beta=4.35*(M200c/(1.e14*h))**(0.0393)*(1.+z)**(0.415)
         alpha=1.
@@ -562,7 +567,7 @@ class profiles(object) :#{{{
             y_norm = 4.013e-6*P_norm*self.cosmo.h**2.
             signal_prof = profiles.__y_profile(
                 theta_grid,
-                M200c, d_A, r200c, r_out, y_norm, theta_out, self.cosmo.h, z
+                M200c, d_A, r200c, r_out, y_norm, theta_out, self.cosmo.h, z, self.cosmo.P0
                 )
         else :
             raise RuntimeError('Unsupported signal type in __generate_profile.')
@@ -613,7 +618,7 @@ class profiles(object) :#{{{
             else :
                 raise RuntimeError('Profiles have not already been computed.')
         if (self.num.Wiener_filter is not None) :
-            print 'Using Wiener filter ' + self.num.Wiener_filter
+            print 'Using Wiener filter '# + self.num.Wiener_filter
             self.convolve_with_Wiener = True
         else :
             self.convolve_with_Wiener = False
@@ -858,30 +863,29 @@ if __name__ == '__main__' :#{{{
     path = './test/'
     cosmo = cosmology(
         # set these to the values in your fiducial cosmology
-#        {
-#        'h':
-#        'Om':
-#        'Ob':
-#        'As':
-#        'pivot_scalar':
-#        'w':
-#        'ns':
-#        'Mnu':
-#        'Neff':
-#        'TCMB':
-#        }
+        {
+        'h': 0.7,
+        'Om0': 0.25,
+        'Ob0': 0.043,
+        'As': 2.71826876e-09,
+        'pivot_scalar': 0.002,
+        'w': -1.0,
+        'ns': 0.96,
+        'Mnu': 0.0,
+        'Neff': 0.0,
+        'TCMB': 2.726
+        }
         )
 
-    # CONSTRUCT THE WIENER FILTER
-    # --> you probably want to load this from file,
-    # this is just a minimal example
-    ell_arr = 10.**np.linspace(2., 4., num = 100)
-    Wiener = np.ones(len(ell_arr))
-    Wiener_interp = interp1d(ell_arr, Wiener, bounds_error = False, fill_value = 0.)
+    # read in Wiener filter
+    wf = np.array([pickle.load(open('act/ell.pkl')), \
+                   pickle.load(open('act/SzWienerFilter.pkl'))]).T
+    wf[:, 1] /= np.max(wf[:, 1])
+    wf_interp = interp1d(wf[:, 0], wf[:, 1], \
+                         bounds_error=False, fill_value=0.0)
 
     num = numerics(
         {
-        'Wiener_filter': lambda ell: Wiener_interp(ell),
 
         # if this option is set to False, an error is thrown if you try
         # to compute something that already exists in path.
@@ -895,16 +899,17 @@ if __name__ == '__main__' :#{{{
 
         # number of datapoints for various grids.
         # The values here are reasonably conservative.
-        'Npoints_theta': 1000,
+        ###'Npoints_theta': 1000,
+        'Npoints_theta': 200, # IS THIS OKAY?
         'Npoints_M': 50,
         'Npoints_z': 51,
         
         # grid boundaries
-        'logM_min': 12.,
+        ###'logM_min': 12.,
+        'logM_min': 11.,
         'logM_max': 16.,
         'z_min': 0.005,
         'z_max': 6.,
-
 
         # maximum signal for which you want to evaluate the PDF (Compton-y for tSZ)
         # due to ringing, I'd recommend setting this to twice the maximum value
@@ -918,7 +923,12 @@ if __name__ == '__main__' :#{{{
 
         # sidelength of the quadratic pixels in radians.
         # note that the pixelisation is only self-consistent at power-spectrum level.
-        'pixel_sidelength': (np.pi/180.)*0.41/60.,
+        ###'pixel_sidelength': (np.pi/180.)*0.41/60.,
+        'pixel_sidelength': 0.0001440,
+
+        # smoothing and filtering
+        'Wiener_filter': lambda ell: wf_interp(ell),
+        'gaussian_kernel_FWHM': 1.4 / 60.0 * np.pi / 180.0
         }
         )
 

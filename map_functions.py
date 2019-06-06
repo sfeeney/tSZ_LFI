@@ -4,7 +4,7 @@ from scipy.interpolate import interp1d
 from scipy.interpolate import RectBivariateSpline
 from numba import jit
 from matplotlib import pyplot as plt
-import pandas as pd
+#import pandas as pd
 import copy
 from pixell import enmap
 
@@ -351,6 +351,7 @@ def map_get_histogram(tSZ_map) :
 
 #@jit(nopython = True)
 def get_Cell(cut, PSmap) :
+    import pandas as pd
     #ell2d = ell2d.flatten()
     #PSmap = PSmap.flatten()
     avg = pd.DataFrame(PSmap).groupby(cut).agg('mean').values

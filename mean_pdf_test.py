@@ -180,6 +180,7 @@ mp.semilogy(bincenters, mean_pdf)
 mp.fill_between(bincenters, mean_pdf - std_pdf, \
 				mean_pdf + std_pdf, alpha=0.5)
 mp.semilogy(ana_bins_full, conv, '--')
+mp.xlim(-200.0, 200.0)
 mp.ylim(1.0e-10, 1.0)
 mp.show()
 
