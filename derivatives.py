@@ -73,8 +73,13 @@ def trap(f, dx):
 
 # basic settings
 use_mpi = True
-generate_pdfs = False
+generate_pdfs = True
 path = './outputs/'
+no_smooth = False
+if no_smooth:
+	stub = '_no_smooth'
+else:
+	stub = ''
 
 # set up MPI environment
 if use_mpi:
@@ -91,7 +96,7 @@ sig_8_fid = 0.7999741174575746
 om_m_fid = 0.25
 p_0_fid = 1.0
 sig_n_fid = 1.0
-delta = 0.01
+delta = 0.1 # 0.01
 dm = 1.0 - delta
 dp = 1.0 + delta
 
@@ -158,12 +163,8 @@ run_pars = np.array([[sig_8_fid, om_m_fid, p_0_fid, sig_n_fid], \
 n_jobs = run_pars.shape[0]
 job_list = allocate_jobs(n_jobs, n_procs, rank)
 
-# analytic, uses fiducial
-#  - sigma_noise
-
 # numerical parameters: same for all runs
-num = opa.numerics(
-    {
+num_dict = {
 
     # if this option is set to False, an error is thrown if you try
     # to compute something that already exists in path.
@@ -177,13 +178,12 @@ num = opa.numerics(
 
     # number of datapoints for various grids.
     # The values here are reasonably conservative.
-    ###'Npoints_theta': 1000,
-    'Npoints_theta': 200, # IS THIS OKAY?
+    'Npoints_theta': 1000,
+    ###'Npoints_theta': 200, # IS THIS OKAY?
     'Npoints_M': 50,
     'Npoints_z': 51,
     
     # grid boundaries
-    ###'logM_min': 12.,
     'logM_min': 11.,
     'logM_max': 16.,
     'z_min': 0.005,
@@ -201,13 +201,17 @@ num = opa.numerics(
 
     # sidelength of the quadratic pixels in radians.
     # note that the pixelisation is only self-consistent at power-spectrum level.
-    'pixel_sidelength': 0.0001440,
+    'pixel_sidelength': map_pixel_size,
 
     # smoothing and filtering
     'Wiener_filter': lambda ell: wf_interp(ell),
-    'gaussian_kernel_FWHM': 1.4 / 60.0 * np.pi / 180.0
-    }
-    )
+    'gaussian_kernel_FWHM': beam_fwhm_arcmin / 60.0 * np.pi / 180.0
+}
+if no_smooth:
+	num_dict['pixel_sidelength'] = None
+	num_dict['Wiener_filter'] = None
+	num_dict['gaussian_kernel_FWHM'] = None
+num = opa.numerics(num_dict)
 
 # loop over jobs
 if generate_pdfs:
@@ -236,12 +240,15 @@ if generate_pdfs:
 	    cos_par['As'] = sigma_8_to_a_s(run_pars[i, 0], cos_par)
 
 	    # generate profiles
-	    path = './outputs/deriv_run_{:d}_'.format(i)
+	    path = './outputs/deriv_run_{:d}'.format(i) + stub + '_'
 	    cosmo = opa.cosmology(cos_par)
 	    cosmo.create_HMF_and_bias(path, num)
 	    pr = opa.profiles(cosmo, num)
 	    pr.create_profiles(path)
-	    pr.create_convolved_profiles(path)
+	    if num.pixel_sidelength is not None or \
+	       num.Wiener_filter is not None or \
+	       num.gaussian_kernel_FWHM is not None:
+		    pr.create_convolved_profiles(path)
 	    pr.create_tildes(path)
 	    p = opa.PDF(cosmo, num, pr)
 	    p.create_alpha0(path)
@@ -268,7 +275,7 @@ if rank == 0:
 	for i in range(n_jobs):
 
 		# read raw files
-		path = './outputs/deriv_run_{:d}_'.format(i)
+		path = './outputs/deriv_run_{:d}'.format(i) + stub + '_'
 		data = np.load(path + 'P.npz')
 		pdf = data['P_uncl'][::-1]
 
@@ -284,19 +291,39 @@ if rank == 0:
 			dtcmb = bins[1] - bins[0]
 			noise_pdf = ss.norm.pdf(bins, 0.0, np.sqrt(tot_var))
 			i_cut = np.abs(bins) < 200.0
+			# @TODO: set cut limit to 690 to see if increasing 
+			# n_theta makes more extreme bins better behaved
 			bins_cut = bins[i_cut]
 
 		# extend to positive delta-T_CMB and convolve all but 
-		# fiducial tSZ PDF with fiducial noise PDF, 
+		# fiducial tSZ PDF with fiducial noise PDF
 		pdf = np.append(np.array(pdf[i_cut_sys]), \
 						np.zeros(np.sum(i_cut_sys) - 1))
 		if i == 0:
 			pdfs.append(pdf)
 		else:
-			conv = np.convolve(pdf, noise_pdf, mode='same')
-			pdfs.append(conv[i_cut] / trap(conv[i_cut], dtcmb))
+			if no_smooth:
+				pdfs.append(pdf[i_cut] / trap(pdf[i_cut], dtcmb))
+			else:
+				conv = np.convolve(pdf, noise_pdf, mode='same')
+				pdfs.append(conv[i_cut] / trap(conv[i_cut], dtcmb))
 			#mp.semilogy(bins_cut, pdfs[-1])
 	#mp.show()
+
+	# alter smoothing for sigma_noise derivatives
+	if no_smooth:
+		pdf_fid = pdfs[0][i_cut] / trap(pdfs[0][i_cut], dtcmb)
+		pdf_minus = pdf_fid
+		pdf_plus = pdf_fid
+	else:
+		pdf_fid = np.convolve(pdfs[0], noise_pdf, mode='same')
+		pdf_fid = pdf_fid[i_cut] / trap(pdf_fid[i_cut], dtcmb)
+		noise_pdf = ss.norm.pdf(bins, 0.0, dm * np.sqrt(tot_var))
+		pdf_minus = np.convolve(pdfs[0], noise_pdf, mode='same')
+		pdf_minus = pdf_minus[i_cut] / trap(pdf_minus[i_cut], dtcmb)
+		noise_pdf = ss.norm.pdf(bins, 0.0, dp * np.sqrt(tot_var))
+		pdf_plus = np.convolve(pdfs[0], noise_pdf, mode='same')
+		pdf_plus = pdf_plus[i_cut] / trap(pdf_plus[i_cut], dtcmb)
 
 	# derivatives: sigma_8, omega_m, p_0...
 	derivs = np.zeros((len(bins_cut), 4))
@@ -304,63 +331,70 @@ if rank == 0:
 		ii = 2 * i
 		derivs[:, i] = (pdfs[ii + 2] - pdfs[ii + 1]) / \
 					   (run_pars[ii + 2, i] - run_pars[ii + 1, i])
-
-	# ... and sigma_noise
-	pdf_fid = np.convolve(pdfs[0], noise_pdf, mode='same')
-	pdf_fid = pdf_fid[i_cut] / trap(pdf_fid[i_cut], dtcmb)
-	noise_pdf = ss.norm.pdf(bins, 0.0, dm * np.sqrt(tot_var))
-	pdf_minus = np.convolve(pdfs[0], noise_pdf, mode='same')
-	pdf_minus = pdf_minus[i_cut] / trap(pdf_minus[i_cut], dtcmb)
-	noise_pdf = ss.norm.pdf(bins, 0.0, dp * np.sqrt(tot_var))
-	pdf_plus = np.convolve(pdfs[0], noise_pdf, mode='same')
-	pdf_plus = pdf_plus[i_cut] / trap(pdf_plus[i_cut], dtcmb)
 	derivs[:, 3] = (pdf_plus - pdf_minus) / (dp - dm)
 
-	# plot derivatives
-	cols = ['k', 'r', 'b', 'g']
-	labs = [r'$\sigma_8$', r'$\Omega_m$', r'$P_0$', r'$\sigma_{\rm noise}$']
+	# deltas too: just (pdf_plus - pdf_fid) / pdf_fid
+	deltas = np.zeros((len(bins_cut), 4))
+	for i in range(3):
+		deltas[:, i] = pdfs[2 * (i + 1)] / pdf_fid - 1.0
+	deltas[:, 3] = pdf_plus / pdf_fid - 1.0
+	if delta == 0.1:
+		deltas[:, 0] *= 0.1
+
+	# plots
+	cols = ['b', 'g', 'r', 'k']
+	labs = [r'\sigma_8', r'\Omega_m', r'P_0', r'\sigma_{\rm noise}']
+	fig, axes = mp.subplots(1, 2, figsize=(16, 5))
 	for i in range(4):
-		mp.semilogy(bins_cut, derivs[:, i], color=cols[i], \
-					label=labs[i])
-		mp.semilogy(bins_cut, np.abs(derivs[:, i]), color=cols[i], \
-					ls=':')
-	mp.legend(loc='lower right')
-	mp.xlim(bins_cut[0], bins_cut[-1])
-	mp.ylim(1e-10, np.max(np.abs(derivs)) * 1.01)
-	mp.savefig('./outputs/derivatives.pdf', bbox_inches='tight')
+		if i == 0 and delta == 0.1:
+			axes[0].plot(bins_cut, deltas[:, i], cols[i], \
+						 label=r'$+\Delta '+labs[i]+r'(\times 0.1)$')
+		else:
+			axes[0].plot(bins_cut, deltas[:, i], cols[i], \
+						 label=r'$+\Delta '+labs[i]+'$')
+		axes[1].semilogy(bins_cut, derivs[:, i], color=cols[i], \
+						 label='$'+labs[i]+'$')
+		axes[1].semilogy(bins_cut, np.abs(derivs[:, i]), color=cols[i], \
+						 ls=':')
+	axes[0].set_xlabel(r'$T\,[\mu{\rm K}]$')
+	axes[0].set_ylabel(r'$p^+/p^{\rm fid} - 1$')
+	axes[0].set_xlim(bins_cut[0], 0.0)
+	if no_smooth:
+		axes[0].legend(loc='lower left')
+		axes[0].set_ylim(-0.4, 0.4)
+	else:
+		axes[0].legend(loc='upper left')
+		axes[0].set_ylim(np.min(deltas[bins_cut <= 0.0]) * 1.01, \
+						 np.max(deltas[bins_cut <= 0.0]) * 1.01)
+	axes[1].set_xlabel(r'$T\,[\mu{\rm K}]$')
+	axes[1].set_ylabel(r'$\partial p/\partial\theta$')
+	axes[1].legend(loc='upper left')
+	axes[1].set_xlim(bins_cut[0], 75.0)
+	axes[1].set_ylim(1e-9, np.max(np.abs(derivs)) * 1.01)
+	mp.savefig('./outputs/derivatives' + stub + '.pdf', \
+			   bbox_inches='tight')
 	mp.close()
 
-	# plot parameter deltas
-	mp.plot(bins_cut, pdfs[2] / pdf_fid - 1.0, \
-			cols[0], label=r'$\Delta \sigma_8$')
-	mp.plot(bins_cut, pdfs[4] / pdf_fid - 1.0, \
-			cols[1], label=r'$\Delta \Omega_m$')
-	mp.plot(bins_cut, pdfs[6] / pdf_fid - 1.0, \
-			cols[2], label=r'$\Delta P_0$')
-	mp.plot(bins_cut, pdf_plus / pdf_fid - 1.0, \
-			cols[3], label=r'$\Delta \sigma_{\rm noise}$')
-	mp.legend(loc='upper right')
-	mp.xlim(bins_cut[0], 0.0)
-	mp.ylim(-0.1, 0.3)
-	mp.savefig('./outputs/deltas.pdf', bbox_inches='tight')
+	exit()
 
 # p_0!
 # need to ensure sigma_8 doesn't change when we change omega_m!
 #  - should already be done. hmm. inversion not accurate enough?
-#  - DOESN'T FIX check 5% derivatives
-#  - DONE check fractional changes a la Hill
+#  - DOESN'T FIX: check 5% derivatives
+#  - DONE: check fractional changes a la Hill
 #     + Omega_M deltas look very different to Leander's
 #     + NB: my deltas are T_CMB not Y. should be stretched, but same shape
 #     + is sigma_8 not accurate enough? the tolerance is 0.0001 though, 
 #       that's 0.01 percent!. can't be this. is he calculating same thing?
 #     + I BELIEVE these are plotted with sigma_8 changing too
-#  - check what happens if you vary Omega_M fixing A_s not sigma_8
+#  - DONE: check what happens if you vary Omega_M fixing A_s not sigma_8
 #     + rerun derivatives with only two variations: pm om_m
 #     + do not recalculate As after setting om_m
 #     + save original derivatives
 #     + or do all this by hand
 #     + resulting deltas look much more like CH plots, but these are 
 #       different to Leander's. hmm.
+#     + STILL WIGGLY THOUGH!
 # derivatives look very noisy: up the settings to what leander uses?
 #  - NO: Npoints_theta?
 #     + still noisy after increasing this to 1000
