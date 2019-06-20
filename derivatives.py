@@ -76,10 +76,15 @@ use_mpi = True
 generate_pdfs = True
 path = './outputs/'
 no_smooth = False
+alt_wf = True
+rve = False
+stub = ''
 if no_smooth:
 	stub = '_no_smooth'
-else:
-	stub = ''
+if alt_wf:
+	stub = '_alt_wf'
+if rve:
+	stub = '_raise_val_err'
 
 # set up MPI environment
 if use_mpi:
@@ -134,8 +139,11 @@ cmb_l_min = int(cmb_ell[0])
 cmb_l_max = int(cmb_ell[-1])
 
 # read in Wiener filter
-wf = np.array([pickle.load(open('act/ell.pkl')), \
-               pickle.load(open('act/SzWienerFilter.pkl'))]).T
+if alt_wf:
+	wf = np.genfromtxt('act/wf_smoothed.txt')
+else:
+	wf = np.array([pickle.load(open('act/ell.pkl')), \
+	               pickle.load(open('act/SzWienerFilter.pkl'))]).T
 wf[:, 1] /= np.max(wf[:, 1])
 wf_interp = si.interp1d(wf[:, 0], wf[:, 1], \
                         bounds_error=False, fill_value=0.0)
