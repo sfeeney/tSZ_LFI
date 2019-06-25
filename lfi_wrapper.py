@@ -72,7 +72,7 @@ numerical_parameters = {
     # set this to True if you want to generate dndOmega and the y-profiles
     # then some non-standard packages will be required
     # TODO
-    'do_physics': False,
+    'do_physics': True,
     
     # set this to true if you have already generated dndOmega and the y-profiles
     # then only maps can be generated using this data
@@ -83,6 +83,9 @@ numerical_parameters = {
     # then only histograms can be generated using this data
     # TODO
     'do_hists': True,
+    
+    # set this to true if you want generate numerical derivatives
+    'do_derivs': True,
     
     # do you want the code to pester you with printouts?
     'verbose': True,
@@ -161,7 +164,7 @@ numerical_parameters = {
 
     # ACT/LFI-specific settings
     'n_patch': 6,
-    'n_real': 2,
+    'n_real': 28,
 
     # parameter grids
     'sigma_8_ext': np.array([0.7, 0.9]),
@@ -170,13 +173,18 @@ numerical_parameters = {
     'sigma_n_ext': np.array([0.85, 1.15]),
     #'sigma_n_ext': np.array([2.3, 2.9]),
 
+    # derivative grid(s)
+    'delta': 0.1,
+
     # path to map storage
-    #'path': '/mnt/ceph/users/sfeeney/tszpdflfi'
-    'path': 'outputs'
+    'path': '/mnt/ceph/users/sfeeney/tszpdflfi'
+    #'path': 'outputs'
 
     }
 #}}}
-path = numerical_parameters['path']
+path = numerical_parameters['path'] + '/'
+if numerical_parameters['do_derivs']:
+    path += 'sim_derivs_'
 
 # set up MPI environment
 if numerical_parameters['use_mpi']:
@@ -187,54 +195,104 @@ else:
     n_procs = 1
     rank = 0
 
-# set up random seeds
-if numerical_parameters['constrain']:
-    seed = 231014 + rank
-else:
+# doing derivatives or not?
+if numerical_parameters['do_derivs']:
+
+    # set up random seeds: pairs of matched seeds to try to cancel
+    # sample variance when generating +/- map pairs
     if rank == 0:
-        seeds = np.random.randint(221216, 231014, 1)[0]
+        if numerical_parameters['constrain']:
+            seed = 231014
+            np.random.seed(seed)
+        n_seeds = numerical_parameters['n_real'] / 2
         seeds = 221216 + np.random.choice(231014 - 221216, \
-                                          size=n_procs, \
+                                          size=n_seeds, \
                                           replace=False)
     else:
         seeds = None
     if numerical_parameters['use_mpi']:
-        seed = mpi.COMM_WORLD.scatter(seeds, root=0)
-np.random.seed(seed)
+        seeds = mpi.COMM_WORLD.bcast(seeds, root=0)
 
-# generate or read job list and corresponding parameter values
-par_ranges = np.array([numerical_parameters['sigma_8_ext'], \
-                       numerical_parameters['omega_m_ext'], \
-                       numerical_parameters['p_0_ext'], \
-                       numerical_parameters['sigma_n_ext']])
-job_list = allocate_jobs(numerical_parameters['n_real'], n_procs, rank)
-if numerical_parameters['do_physics']:
+    # generate or read job list and corresponding parameter values
+    job_list = allocate_jobs(numerical_parameters['n_real'], n_procs, rank)
+    if numerical_parameters['do_physics']:
 
-    # generate simulation locations on latin hypercube
-    grid_locs = np.zeros((numerical_parameters['n_real'], 4))
-    if rank == 0:
-        grid_fracs = pd.lhs(4, numerical_parameters['n_real'], 'maximin')
-        grid_locs = par_ranges[:, 0] + grid_fracs * \
-                    (par_ranges[:, 1] - par_ranges[:, 0])
-        np.savetxt(path + '/par_grid.txt', grid_locs)
-        if numerical_parameters['constrain']:
-            np.random.seed(seed)
-    if numerical_parameters['use_mpi']:
-        mpi.COMM_WORLD.Bcast(grid_locs, root=0)
+        # generate simulation locations on latin hypercube
+        grid_locs = np.zeros((numerical_parameters['n_real'], 4))
+        for i in range(numerical_parameters['n_real']):
+            grid_locs[i, :] = [0.7999741174575746, \
+                               0.25 * (1.0 + (-1) ** (i + 1 % 2) * \
+                               numerical_parameters['delta']), \
+                               1.0, 1.0]
+        if rank == 0:
+            np.savetxt(path + 'par_grid.txt', grid_locs)
+            np.savetxt(path + 'rand_seeds.txt', seeds, fmt='%d')
+
+    else:
+
+        # read from file
+        grid_locs = np.genfromtxt(path + 'par_grid.txt')
+        seeds = np.genfromtxt(path + 'rand_seeds.txt', dtype='int')
+        n_real_file = grid_locs.shape[0]
+        if n_real_file != numerical_parameters['n_real']:
+            if rank == 0:
+                print('{:d}'.format(n_real_file) + \
+                      ' realisations specified in input file;')
+                print('{:d}'.format(numerical_parameters['n_real']) + \
+                      ' requested in Python setup')
+                print('producing {:d} realisations'.format(n_real_file))
+            numerical_parameters['n_real'] = n_real_file
 
 else:
 
-    # read from file
-    grid_locs = np.genfromtxt(path + '/par_grid.txt')
-    n_real_file = grid_locs.shape[0]
-    if n_real_file != numerical_parameters['n_real']:
+    # set up random seeds
+    if numerical_parameters['constrain']:
+        seed = 231014 + rank
+    else:
         if rank == 0:
-            print('{:d}'.format(n_real_file) + \
-                  ' realisations specified in input file;')
-            print('{:d}'.format(numerical_parameters['n_real']) + \
-                  ' requested in Python setup')
-            print('producing {:d} realisations'.format(n_real_file))
-        numerical_parameters['n_real'] = n_real_file
+            seeds = np.random.randint(221216, 231014, 1)[0]
+            seeds = 221216 + np.random.choice(231014 - 221216, \
+                                              size=n_procs, \
+                                              replace=False)
+        else:
+            seeds = None
+        if numerical_parameters['use_mpi']:
+            seed = mpi.COMM_WORLD.scatter(seeds, root=0)
+    np.random.seed(seed)
+
+    # generate or read job list and corresponding parameter values
+    par_ranges = np.array([numerical_parameters['sigma_8_ext'], \
+                           numerical_parameters['omega_m_ext'], \
+                           numerical_parameters['p_0_ext'], \
+                           numerical_parameters['sigma_n_ext']])
+    job_list = allocate_jobs(numerical_parameters['n_real'], n_procs, rank)
+    if numerical_parameters['do_physics']:
+
+        # generate simulation locations on latin hypercube
+        grid_locs = np.zeros((numerical_parameters['n_real'], 4))
+        if rank == 0:
+            grid_fracs = pd.lhs(4, numerical_parameters['n_real'], 'maximin')
+            grid_locs = par_ranges[:, 0] + grid_fracs * \
+                        (par_ranges[:, 1] - par_ranges[:, 0])
+            np.savetxt(path + 'par_grid.txt', grid_locs)
+            if numerical_parameters['constrain']:
+                np.random.seed(seed)
+        if numerical_parameters['use_mpi']:
+            mpi.COMM_WORLD.Bcast(grid_locs, root=0)
+
+    else:
+
+        # read from file
+        grid_locs = np.genfromtxt(path + 'par_grid.txt')
+        n_real_file = grid_locs.shape[0]
+        if n_real_file != numerical_parameters['n_real']:
+            if rank == 0:
+                print('{:d}'.format(n_real_file) + \
+                      ' realisations specified in input file;')
+                print('{:d}'.format(numerical_parameters['n_real']) + \
+                      ' requested in Python setup')
+                print('producing {:d} realisations'.format(n_real_file))
+            numerical_parameters['n_real'] = n_real_file
 
 # context-specific imports
 if numerical_parameters['do_physics'] :
@@ -282,14 +340,15 @@ if numerical_parameters['do_maps'] or numerical_parameters['do_hists']:
     posbincenters = -1.0 * negbincenters
     bincenters = np.ravel(np.array([negbincenters,posbincenters[::-1]]))
 
-
 # loop over each process's jobs
 for ii in job_list:
 
-    grid_locs[:, 0] = 0.7999741174575746
-    grid_locs[:, 1] = 0.25
+    # progress
     print(rank, grid_locs[ii, 0], grid_locs[ii, 1])
-    exit()
+
+    # set the appropriate seed if required
+    if numerical_parameters['do_derivs']:
+        np.random.seed(seeds[ii / 2])
 
     # cosmology parameters #{{{
     cosmology_parameters = {
@@ -442,7 +501,7 @@ for ii in job_list:
                                             spectra=['total'], \
                                             CMB_unit='muK', \
                                             raw_cl=True)['total'][:, 0]
-        np.savetxt(path + '/cmb_c_l_{:d}.txt'.format(ii), \
+        np.savetxt(path + 'cmb_c_l_{:d}.txt'.format(ii), \
                    np.column_stack((ell, c_l)))
         '''
 
@@ -465,14 +524,14 @@ for ii in job_list:
         # generate the 2D number density of sources
         dndOmega = pfunc.map_generate_dndOmega(numerical_parameters, \
                                                cosmology_parameters)
-        np.savez(path + '/dndOmega_{:d}.npz'.format(ii), \
+        np.savez(path + 'dndOmega_{:d}.npz'.format(ii), \
                  dndOmega=dndOmega)
         
         # generate the y-profiles
         thetas, yprofiles = \
             pfunc.map_generate_yprofiles(numerical_parameters, \
                                          cosmology_parameters)
-        np.savez(path + '/yprofiles_{:d}.npz'.format(ii), \
+        np.savez(path + 'yprofiles_{:d}.npz'.format(ii), \
                  thetas=thetas, yprofiles=yprofiles)
 
 
@@ -487,9 +546,9 @@ for ii in job_list:
                     cosmology_parameters['TCMB'])
 
         # read in tSZ calculations
-        f = np.load(path + '/dndOmega_{:d}.npz'.format(ii))
+        f = np.load(path + 'dndOmega_{:d}.npz'.format(ii))
         dndOmega = f['dndOmega']
-        f = np.load(path + '/yprofiles_{:d}.npz'.format(ii))
+        f = np.load(path + 'yprofiles_{:d}.npz'.format(ii))
         thetas = f['thetas']
         yprofiles = f['yprofiles']
 
@@ -513,9 +572,9 @@ for ii in job_list:
                                                       cosmology_parameters, \
                                                       dndOmega, thetas, \
                                                       yprofiles, wcss[jj])
-                enmap.write_fits(path + '/tsz_map' + stub + '.fits', sz_map)
+                enmap.write_fits(path + 'tsz_map' + stub + '.fits', sz_map)
             else:
-                sz_map = enmap.read_map(path + '/tsz_map' + stub + '.fits')
+                sz_map = enmap.read_map(path + 'tsz_map' + stub + '.fits')
 
             # generates a noise map of the same shape as the final map
             if numerical_parameters['do_maps']:
@@ -523,9 +582,9 @@ for ii in job_list:
                     mfunc.map_generate_random_noise(numerical_parameters, \
                                                     cosmology_parameters, \
                                                     wcss[jj])
-                enmap.write_fits(path + '/noise_map' + stub + '.fits', noise_map)
+                enmap.write_fits(path + 'noise_map' + stub + '.fits', noise_map)
             else:
-                noise_map = enmap.read_map(path + '/noise_map' + stub + '.fits')
+                noise_map = enmap.read_map(path + 'noise_map' + stub + '.fits')
             
             # combine components, rescaling by relevant parameters
             tot_maps.append(enmap.enmap(sz_map * grid_locs[ii, 2] + \
@@ -537,5 +596,5 @@ for ii in job_list:
             pdf = mfunc.map_act_hist(tot_maps, numerical_parameters, \
                                      cosmology_parameters, wf, masks, \
                                      apo_masks, negbins, posbins)
-            np.savetxt(path + '/combined_hist_{:d}.txt'.format(ii), pdf)
+            np.savetxt(path + 'combined_hist_{:d}.txt'.format(ii), pdf)
 
