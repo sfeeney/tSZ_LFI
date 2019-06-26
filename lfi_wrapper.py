@@ -72,17 +72,17 @@ numerical_parameters = {
     # set this to True if you want to generate dndOmega and the y-profiles
     # then some non-standard packages will be required
     # TODO
-    'do_physics': True,
+    'do_physics': False,
     
     # set this to true if you have already generated dndOmega and the y-profiles
     # then only maps can be generated using this data
     # TODO
-    'do_maps': True,
+    'do_maps': False,
     
     # set this to true if you have already generated maps
     # then only histograms can be generated using this data
     # TODO
-    'do_hists': True,
+    'do_hists': False,
     
     # set this to true if you want generate numerical derivatives
     'do_derivs': True,
@@ -180,8 +180,8 @@ numerical_parameters = {
     'delta': 0.1,
 
     # path to map storage
-    'path': '/mnt/ceph/users/sfeeney/tszpdflfi'
-    #'path': 'outputs'
+    #'path': '/mnt/ceph/users/sfeeney/tszpdflfi'
+    'path': 'outputs'
 
     }
 #}}}
@@ -303,17 +303,30 @@ if numerical_parameters['do_physics'] :
     from astropy.cosmology import FlatLambdaCDM
     import astropy.units as u
     from colossus.cosmology import cosmology as colossus_cosmology
-if numerical_parameters['do_maps'] or numerical_parameters['do_hists'] :
+if numerical_parameters['do_maps'] or \
+   numerical_parameters['do_hists']:
     import map_functions as mfunc
-    from scipy.interpolate import interp1d
     from pixell import enmap
     import pickle
+if numerical_parameters['do_derivs']:
+    from pixell import enmap
+    import pickle
+    import os
+    notk = False
+    if 'DISPLAY' not in os.environ.keys():
+            notk = True
+    elif os.environ['DISPLAY'] == ':0':
+            notk = True
+    if notk:
+        import matplotlib
+        matplotlib.use('Agg')
+    import matplotlib.pyplot as mp
 
-# cosmology-independent i/o & setup
-if numerical_parameters['do_maps'] or numerical_parameters['do_hists']:
-
-    # read in CMB C_ls
-    cmb_ell, cmb_c_l = np.loadtxt('act/cmb_c_l_fiducial.txt', unpack=True)
+# cosmology-independent i/o & setup. first read in CMB C_ls
+cmb_ell, cmb_c_l = np.loadtxt('act/cmb_c_l_fiducial.txt', unpack=True)
+if numerical_parameters['do_maps'] or \
+   numerical_parameters['do_hists'] or \
+   numerical_parameters['do_derivs']:
 
     # read in patch coordinates
     with open('act/patch_coords.pkl', 'rb') as f:
@@ -344,259 +357,287 @@ if numerical_parameters['do_maps'] or numerical_parameters['do_hists']:
     bincenters = np.ravel(np.array([negbincenters,posbincenters[::-1]]))
 
 # loop over each process's jobs
-for ii in job_list:
+if numerical_parameters['do_physics'] or \
+   numerical_parameters['do_maps'] or \
+   numerical_parameters['do_hists']:
+    for ii in job_list:
 
-    # progress
-    print(rank, grid_locs[ii, 0], grid_locs[ii, 1])
+        # progress
+        print(rank, grid_locs[ii, 0], grid_locs[ii, 1])
 
-    # set the appropriate seed if required
-    if numerical_parameters['do_derivs']:
-        np.random.seed(seeds[ii / 2])
+        # set the appropriate seed if required
+        if numerical_parameters['do_derivs']:
+            np.random.seed(seeds[ii / 2])
 
-    # cosmology parameters #{{{
-    cosmology_parameters = {
+        # cosmology parameters #{{{
+        cosmology_parameters = {
+            
+            # Standard cosmology parameters
+            # TODO
+            'H0': 70.,# km/s/Mpc
+            #'Om0': 0.25,# dimensionless (total) matter density
+            'Om0': grid_locs[ii, 1],# dimensionless (total) matter density
+            'w': -1., # flat LCDM
+            'ns': 0.96,# scalar spectral index
+            'As': 2.71826876e-9,# scalar amplitude at pivot scale k_piv=0.002 Mpc^-1
+            'pivot_scalar': 0.002,
+            'Ob0': 0.043,# dimensionless baryon density
+            'Mnu': 0., # no neutrinos
+            'Neff': 0.,# no neutrinos
+            'TCMB': 2.726,# K
+
+            # Physical constants
+            'delta_c': 1.686,
+            'c0': 2.99792458e5, #km/s
+            'hPlanck': 6.62607004e-34,
+            'kBoltzmann':1.38064852e-23,
+
+            # Observation frequency, required to convert Compton-y to temperature decrement
+            # TODO
+            'frequency': 148e9, # Hertz
+
+            # Mass definition of the mass grid
+            #   '200m', '200c', 'vir'
+            'mass_def_initial': '200m',
+
+            # Mass definition of the y-profile fitting function
+            #   '200c'
+            'mass_def_batt': '200c',
+
+            # Mass definition of the HMF fitting function
+            #   '200m'
+            'mass_def_Tinker': '200m',
+
+            # Definition of the outer radius
+            #   'vir', '200'
+            'r_out_def': 'vir',
+
+            # Fitting Models
+            'concentration_model': 'duffy08',
+            'halo_profile': 'nfw',
+
+            # Pressure profile parameters, as defined in arXiv:1812.05584 pg 4
+            'pressure_profile_P0': 18.1,
+            'pressure_profile_xc0': 0.497,
+            'pressure_profile_beta0': 4.35,
+            'pressure_profile_alpha': 1.,
+            'pressure_profile_gamma': -0.3,
+
+            # Simple instrumental model
+            'beam_fwhm_arcmin': 1.4,
+            'noise_rms_muk_arcmin': 18.0,
+            
+            # CMB power spectrum
+            'cmb_ell': cmb_ell,
+            'cmb_c_l': cmb_c_l
+
+            }
+        #}}}
+        cosmology_parameters['h'] = cosmology_parameters['H0'] / 100.0
+        cosmology_parameters['OL0'] = 1.0 - cosmology_parameters['Om0'] #flat LCDM
+        cosmology_parameters['Oc0'] = cosmology_parameters['Om0'] - \
+                                      cosmology_parameters['Ob0'] # CDM density
+        cosmology_parameters['rhoM'] = cosmology_parameters['Om0'] * 2.7753e11
+        cosmology_parameters['As'] = sigma_8_to_a_s(grid_locs[ii, 0], \
+                                                    cosmology_parameters)
+
+        # generate logarithmic mass grid
+        numerical_parameters['map_logM_boundaries'] = np.linspace(
+                numerical_parameters['map_logM_min'],
+                numerical_parameters['map_logM_max'],
+                num = numerical_parameters['map_Npoints_M'] + 1
+                )
         
-        # Standard cosmology parameters
-        # TODO
-        'H0': 70.,# km/s/Mpc
-        #'Om0': 0.25,# dimensionless (total) matter density
-        'Om0': grid_locs[ii, 1],# dimensionless (total) matter density
-        'w': -1., # flat LCDM
-        'ns': 0.96,# scalar spectral index
-        'As': 2.71826876e-9,# scalar amplitude at pivot scale k_piv=0.002 Mpc^-1
-        'pivot_scalar': 0.002,
-        'Ob0': 0.043,# dimensionless baryon density
-        'Mnu': 0., # no neutrinos
-        'Neff': 0.,# no neutrinos
-        'TCMB': 2.726,# K
-
-        # Physical constants
-        'delta_c': 1.686,
-        'c0': 2.99792458e5, #km/s
-        'hPlanck': 6.62607004e-34,
-        'kBoltzmann':1.38064852e-23,
-
-        # Observation frequency, required to convert Compton-y to temperature decrement
-        # TODO
-        'frequency': 148e9, # Hertz
-
-        # Mass definition of the mass grid
-        #   '200m', '200c', 'vir'
-        'mass_def_initial': '200m',
-
-        # Mass definition of the y-profile fitting function
-        #   '200c'
-        'mass_def_batt': '200c',
-
-        # Mass definition of the HMF fitting function
-        #   '200m'
-        'mass_def_Tinker': '200m',
-
-        # Definition of the outer radius
-        #   'vir', '200'
-        'r_out_def': 'vir',
-
-        # Fitting Models
-        'concentration_model': 'duffy08',
-        'halo_profile': 'nfw',
-
-        # Pressure profile parameters, as defined in arXiv:1812.05584 pg 4
-        'pressure_profile_P0': 18.1,
-        'pressure_profile_xc0': 0.497,
-        'pressure_profile_beta0': 4.35,
-        'pressure_profile_alpha': 1.,
-        'pressure_profile_gamma': -0.3,
-
-        # Simple instrumental model
-        'beam_fwhm_arcmin': 1.4,
-        'noise_rms_muk_arcmin': 18.0,
-        
-        # CMB power spectrum
-        'cmb_ell': cmb_ell,
-        'cmb_c_l': cmb_c_l
-
-        }
-    #}}}
-    cosmology_parameters['h'] = cosmology_parameters['H0'] / 100.0
-    cosmology_parameters['OL0'] = 1.0 - cosmology_parameters['Om0'] #flat LCDM
-    cosmology_parameters['Oc0'] = cosmology_parameters['Om0'] - \
-                                  cosmology_parameters['Ob0'] # CDM density
-    cosmology_parameters['rhoM'] = cosmology_parameters['Om0'] * 2.7753e11
-    cosmology_parameters['As'] = sigma_8_to_a_s(grid_locs[ii, 0], \
-                                                cosmology_parameters)
-
-    # generate logarithmic mass grid
-    numerical_parameters['map_logM_boundaries'] = np.linspace(
-            numerical_parameters['map_logM_min'],
-            numerical_parameters['map_logM_max'],
-            num = numerical_parameters['map_Npoints_M'] + 1
-            )
-    
-    # generate redshift grid
-    numerical_parameters['map_z_boundaries'] = np.linspace(
-            numerical_parameters['map_z_min'],
-            numerical_parameters['map_z_max'],
-            num = numerical_parameters['map_Npoints_z'] +1
-            )
-
-    # do physical tSZ calculations
-    if numerical_parameters['do_physics'] :
-        
-        # add an astropy object
-        cosmology_parameters['cosmo_object'] = FlatLambdaCDM(
-                H0=cosmology_parameters['H0'] * u.km / u.s / u.Mpc,
-                Tcmb0=cosmology_parameters['TCMB'] * u.K,
-                Om0=cosmology_parameters['Om0'],
-                Neff=cosmology_parameters['Neff'],
-                m_nu=cosmology_parameters['Mnu'] * u.eV,
-                Ob0=cosmology_parameters['Ob0'],
-                name='my_cosmology'
+        # generate redshift grid
+        numerical_parameters['map_z_boundaries'] = np.linspace(
+                numerical_parameters['map_z_min'],
+                numerical_parameters['map_z_max'],
+                num = numerical_parameters['map_Npoints_z'] +1
                 )
 
-        # matter power spectrum parameters
-        PK_params = {
-                'zmin': 0. ,
-                'zmax': numerical_parameters['map_z_max'] + 1.,
-                'nz_step': 150,
-                'kmax': numerical_parameters['k_max'] + 1.,
-                'nonlinear': False,
-                'hubble_units': True,
-                'k_hunit': True,
-                }
-
-        # Create the Power Spectrum Interpolator with CAMB
-        pars = camb.CAMBparams()
-        pars.set_cosmology(
-                H0 = cosmology_parameters['H0'],
-                ombh2 = cosmology_parameters['Ob0'] * cosmology_parameters['h']**2,
-                omch2 = cosmology_parameters['Oc0'] * cosmology_parameters['h']**2,
-                omk = 0.,
-                mnu = cosmology_parameters['Mnu'],
-                standard_neutrino_neff = cosmology_parameters['Neff'],
-                nnu = cosmology_parameters['Neff'],
-                TCMB = cosmology_parameters['TCMB']
-                )
-        pars.InitPower.set_params(ns = cosmology_parameters['ns'], As = cosmology_parameters['As'], pivot_scalar = cosmology_parameters['pivot_scalar'])
-        pars.NonLinear = model.NonLinear_none
-        cosmology_parameters['PK'] = camb.get_matter_power_interpolator(
-                pars,
-                zmin = PK_params['zmin'],
-                zmax = PK_params['zmax'],
-                nz_step = PK_params['nz_step'],
-                kmax = PK_params['kmax'],
-                nonlinear = PK_params['nonlinear'],
-                hubble_units = PK_params['hubble_units'],
-                k_hunit = PK_params['k_hunit']
-                ).P
-        pars.set_matter_power(redshifts = [0.], kmax = 20.)
-        results = camb.get_results(pars)
-        cosmology_parameters['sigma8'] = results.get_sigma8()[0]
-
-        '''
-        # Generate CMB power spectrum
-        pars.set_for_lmax(numerical_parameters['l_max'], \
-                          lens_potential_accuracy=1)
-        results = camb.get_results(pars)
-        ell = np.linspace(0, numerical_parameters['l_max'], \
-                          numerical_parameters['l_max'] + 1, dtype=int)
-        c_l = results.get_cmb_power_spectra(pars, \
-                                            lmax=numerical_parameters['l_max'], \
-                                            spectra=['total'], \
-                                            CMB_unit='muK', \
-                                            raw_cl=True)['total'][:, 0]
-        np.savetxt(path + 'cmb_c_l_{:d}.txt'.format(ii), \
-                   np.column_stack((ell, c_l)))
-        '''
-
-        # Colossus cosmology
-        # @TODO: can we remove?
-        colossus_params = {
-                'flat': True,
-                'H0': cosmology_parameters['H0'],
-                'Om0': cosmology_parameters['Om0'],
-                'Ob0': cosmology_parameters['Ob0'],
-                'sigma8': cosmology_parameters['sigma8'],
-                'ns': cosmology_parameters['ns'],
-                'de_model': 'w0',
-                'w0': cosmology_parameters['w'],
-                'Tcmb0': cosmology_parameters['TCMB'],
-                'Neff': cosmology_parameters['Neff']
-                }
-        colossus_cosmology.setCosmology('cosmo_object', colossus_params)
-
-        # generate the 2D number density of sources
-        dndOmega = pfunc.map_generate_dndOmega(numerical_parameters, \
-                                               cosmology_parameters)
-        np.savez(path + 'dndOmega_{:d}.npz'.format(ii), \
-                 dndOmega=dndOmega)
-        
-        # generate the y-profiles
-        thetas, yprofiles = \
-            pfunc.map_generate_yprofiles(numerical_parameters, \
-                                         cosmology_parameters)
-        np.savez(path + 'yprofiles_{:d}.npz'.format(ii), \
-                 thetas=thetas, yprofiles=yprofiles)
-
-
-    # produce maps and / or histograms
-    if numerical_parameters['do_maps'] or numerical_parameters['do_hists']:
-
-        # Compton-y --> Temperature conversion parameter
-        cosmology_parameters['gnu'] = \
-            mfunc.g(cosmology_parameters['hPlanck'] * \
-                    cosmology_parameters['frequency'] / \
-                    cosmology_parameters['kBoltzmann'] / \
-                    cosmology_parameters['TCMB'])
-
-        # read in tSZ calculations
-        f = np.load(path + 'dndOmega_{:d}.npz'.format(ii))
-        dndOmega = f['dndOmega']
-        f = np.load(path + 'yprofiles_{:d}.npz'.format(ii))
-        thetas = f['thetas']
-        yprofiles = f['yprofiles']
-
-        # loop over patches per realisation
-        tot_maps = []
-        for jj in xrange(numerical_parameters['n_patch']) :
+        # do physical tSZ calculations
+        if numerical_parameters['do_physics']:
             
-            # report progress if desired
-            if numerical_parameters['verbose'] :
-                print 'I am in index = ' + str(ii)
-            
-            # generate a single tSZ map
-            # Note: the runtime of this function is dominated by the 
-            #       mfunc.throw_clusters function, which is just array
-            #       manipulation.
-            #       The usage of numba.jit is very helpful in keeping 
-            #       runtime reasonable.
-            stub = '_{:d}_{:d}'.format(ii, jj)
-            if numerical_parameters['do_maps']:
-                sz_map = mfunc.map_generate_final_map(numerical_parameters, \
-                                                      cosmology_parameters, \
-                                                      dndOmega, thetas, \
-                                                      yprofiles, wcss[jj])
-                enmap.write_fits(path + 'tsz_map' + stub + '.fits', sz_map)
-            else:
-                sz_map = enmap.read_map(path + 'tsz_map' + stub + '.fits')
+            # add an astropy object
+            cosmology_parameters['cosmo_object'] = FlatLambdaCDM(
+                    H0=cosmology_parameters['H0'] * u.km / u.s / u.Mpc,
+                    Tcmb0=cosmology_parameters['TCMB'] * u.K,
+                    Om0=cosmology_parameters['Om0'],
+                    Neff=cosmology_parameters['Neff'],
+                    m_nu=cosmology_parameters['Mnu'] * u.eV,
+                    Ob0=cosmology_parameters['Ob0'],
+                    name='my_cosmology'
+                    )
 
-            # generates a noise map of the same shape as the final map
-            if numerical_parameters['do_maps']:
-                noise_map = \
-                    mfunc.map_generate_random_noise(numerical_parameters, \
-                                                    cosmology_parameters, \
-                                                    wcss[jj])
-                enmap.write_fits(path + 'noise_map' + stub + '.fits', noise_map)
-            else:
-                noise_map = enmap.read_map(path + 'noise_map' + stub + '.fits')
-            
-            # combine components, rescaling by relevant parameters
-            tot_maps.append(enmap.enmap(sz_map * grid_locs[ii, 2] + \
-                                        noise_map * grid_locs[ii, 3], \
-                                        wcs=wcss[jj]))
+            # matter power spectrum parameters
+            PK_params = {
+                    'zmin': 0. ,
+                    'zmax': numerical_parameters['map_z_max'] + 1.,
+                    'nz_step': 150,
+                    'kmax': numerical_parameters['k_max'] + 1.,
+                    'nonlinear': False,
+                    'hubble_units': True,
+                    'k_hunit': True,
+                    }
 
-        # apply ACT masks and filters, and histogram!
-        if numerical_parameters['do_hists']:
-            pdf = mfunc.map_act_hist(tot_maps, numerical_parameters, \
-                                     wf, masks, apo_masks, negbins, posbins)
-            np.savetxt(path + 'combined_hist_{:d}.txt'.format(ii), pdf)
+            # Create the Power Spectrum Interpolator with CAMB
+            pars = camb.CAMBparams()
+            pars.set_cosmology(
+                    H0 = cosmology_parameters['H0'],
+                    ombh2 = cosmology_parameters['Ob0'] * cosmology_parameters['h']**2,
+                    omch2 = cosmology_parameters['Oc0'] * cosmology_parameters['h']**2,
+                    omk = 0.,
+                    mnu = cosmology_parameters['Mnu'],
+                    standard_neutrino_neff = cosmology_parameters['Neff'],
+                    nnu = cosmology_parameters['Neff'],
+                    TCMB = cosmology_parameters['TCMB']
+                    )
+            pars.InitPower.set_params(ns = cosmology_parameters['ns'], As = cosmology_parameters['As'], pivot_scalar = cosmology_parameters['pivot_scalar'])
+            pars.NonLinear = model.NonLinear_none
+            cosmology_parameters['PK'] = camb.get_matter_power_interpolator(
+                    pars,
+                    zmin = PK_params['zmin'],
+                    zmax = PK_params['zmax'],
+                    nz_step = PK_params['nz_step'],
+                    kmax = PK_params['kmax'],
+                    nonlinear = PK_params['nonlinear'],
+                    hubble_units = PK_params['hubble_units'],
+                    k_hunit = PK_params['k_hunit']
+                    ).P
+            pars.set_matter_power(redshifts = [0.], kmax = 20.)
+            results = camb.get_results(pars)
+            cosmology_parameters['sigma8'] = results.get_sigma8()[0]
+
+            '''
+            # Generate CMB power spectrum
+            pars.set_for_lmax(numerical_parameters['l_max'], \
+                              lens_potential_accuracy=1)
+            results = camb.get_results(pars)
+            ell = np.linspace(0, numerical_parameters['l_max'], \
+                              numerical_parameters['l_max'] + 1, dtype=int)
+            c_l = results.get_cmb_power_spectra(pars, \
+                                                lmax=numerical_parameters['l_max'], \
+                                                spectra=['total'], \
+                                                CMB_unit='muK', \
+                                                raw_cl=True)['total'][:, 0]
+            np.savetxt(path + 'cmb_c_l_{:d}.txt'.format(ii), \
+                       np.column_stack((ell, c_l)))
+            '''
+
+            # Colossus cosmology
+            # @TODO: can we remove?
+            colossus_params = {
+                    'flat': True,
+                    'H0': cosmology_parameters['H0'],
+                    'Om0': cosmology_parameters['Om0'],
+                    'Ob0': cosmology_parameters['Ob0'],
+                    'sigma8': cosmology_parameters['sigma8'],
+                    'ns': cosmology_parameters['ns'],
+                    'de_model': 'w0',
+                    'w0': cosmology_parameters['w'],
+                    'Tcmb0': cosmology_parameters['TCMB'],
+                    'Neff': cosmology_parameters['Neff']
+                    }
+            colossus_cosmology.setCosmology('cosmo_object', colossus_params)
+
+            # generate the 2D number density of sources
+            dndOmega = pfunc.map_generate_dndOmega(numerical_parameters, \
+                                                   cosmology_parameters)
+            np.savez(path + 'dndOmega_{:d}.npz'.format(ii), \
+                     dndOmega=dndOmega)
+            
+            # generate the y-profiles
+            thetas, yprofiles = \
+                pfunc.map_generate_yprofiles(numerical_parameters, \
+                                             cosmology_parameters)
+            np.savez(path + 'yprofiles_{:d}.npz'.format(ii), \
+                     thetas=thetas, yprofiles=yprofiles)
+
+
+        # produce maps and / or histograms
+        if numerical_parameters['do_maps'] or numerical_parameters['do_hists']:
+
+            # Compton-y --> Temperature conversion parameter
+            cosmology_parameters['gnu'] = \
+                mfunc.g(cosmology_parameters['hPlanck'] * \
+                        cosmology_parameters['frequency'] / \
+                        cosmology_parameters['kBoltzmann'] / \
+                        cosmology_parameters['TCMB'])
+
+            # read in tSZ calculations
+            f = np.load(path + 'dndOmega_{:d}.npz'.format(ii))
+            dndOmega = f['dndOmega']
+            f = np.load(path + 'yprofiles_{:d}.npz'.format(ii))
+            thetas = f['thetas']
+            yprofiles = f['yprofiles']
+
+            # loop over patches per realisation
+            tot_maps = []
+            for jj in xrange(numerical_parameters['n_patch']) :
+                
+                # report progress if desired
+                if numerical_parameters['verbose'] :
+                    print 'I am in index = ' + str(ii)
+                
+                # generate a single tSZ map
+                # Note: the runtime of this function is dominated by the 
+                #       mfunc.throw_clusters function, which is just array
+                #       manipulation.
+                #       The usage of numba.jit is very helpful in keeping 
+                #       runtime reasonable.
+                stub = '_{:d}_{:d}'.format(ii, jj)
+                if numerical_parameters['do_maps']:
+                    sz_map = mfunc.map_generate_final_map(numerical_parameters, \
+                                                          cosmology_parameters, \
+                                                          dndOmega, thetas, \
+                                                          yprofiles, wcss[jj])
+                    enmap.write_fits(path + 'tsz_map' + stub + '.fits', sz_map)
+                else:
+                    sz_map = enmap.read_map(path + 'tsz_map' + stub + '.fits')
+
+                # generates a noise map of the same shape as the final map
+                if numerical_parameters['do_maps']:
+                    noise_map = \
+                        mfunc.map_generate_random_noise(numerical_parameters, \
+                                                        cosmology_parameters, \
+                                                        wcss[jj])
+                    enmap.write_fits(path + 'noise_map' + stub + '.fits', noise_map)
+                else:
+                    noise_map = enmap.read_map(path + 'noise_map' + stub + '.fits')
+                
+                # combine components, rescaling by relevant parameters
+                tot_maps.append(enmap.enmap(sz_map * grid_locs[ii, 2] + \
+                                            noise_map * grid_locs[ii, 3], \
+                                            wcs=wcss[jj]))
+
+            # apply ACT masks and filters, and histogram!
+            if numerical_parameters['do_hists']:
+                pdf = mfunc.map_act_hist(tot_maps, numerical_parameters, \
+                                         wf, masks, apo_masks, negbins, posbins)
+                np.savetxt(path + 'combined_hist_{:d}.txt'.format(ii), pdf)
+
+# process histograms on master thread
+if numerical_parameters['do_derivs']:
+
+    # read all PDFs
+    pdfs = []
+    for ii in range(numerical_parameters['n_real']):
+        pdfs.append(np.genfromtxt(path + \
+                                  'combined_hist_{:d}.txt'.format(ii)))
+    pdfs = np.array(pdfs)
+
+    # calculate derivatives
+    derivs = np.zeros((pdfs.shape[0] / 2, pdfs.shape[1]))
+    for ii in range(numerical_parameters['n_real'] / 2):
+        derivs[ii] = (pdfs[2 * ii + 1, :] - pdfs[2 * ii, :]) / \
+                     (grid_locs[2 * ii + 1, 1] - grid_locs[2 * ii, 1])
+    mean_deriv = np.mean(derivs, axis=0)
+    std_deriv = np.std(derivs, axis=0)
+    mp.semilogy(bincenters, mean_deriv, color='b')
+    mp.semilogy(bincenters, -mean_deriv, color='b', ls=':')
+    mp.fill_between(bincenters, mean_deriv - std_deriv, \
+                    mean_deriv + std_deriv, alpha=0.5)
+    mp.xlabel(r'$T_{\rm CMB}\,[\mu{\rm K}]$')
+    mp.ylabel(r'$\partial p/\partial \Omega_{\rm m}$')
+    mp.savefig(path + 'omega_m_deriv.pdf', bbox_inches='tight')
 
