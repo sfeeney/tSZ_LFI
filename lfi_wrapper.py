@@ -155,6 +155,9 @@ numerical_parameters = {
     # TODO
     'noise_power_spectrum_file': 'SO_LAT_Nell_T_goal_fsky0p4_ILC_tSZ.txt',
 
+    # whether you want to include the halo bias
+    'map_include_bias': False,
+
     # some integration boundaries, should not need any changing
     'k_max': 100,
     'k_min': 1e-10,
@@ -164,7 +167,7 @@ numerical_parameters = {
 
     # ACT/LFI-specific settings
     'n_patch': 6,
-    'n_real': 28,
+    'n_real': 56,
 
     # parameter grids
     'sigma_8_ext': np.array([0.7, 0.9]),
@@ -594,7 +597,6 @@ for ii in job_list:
         # apply ACT masks and filters, and histogram!
         if numerical_parameters['do_hists']:
             pdf = mfunc.map_act_hist(tot_maps, numerical_parameters, \
-                                     cosmology_parameters, wf, masks, \
-                                     apo_masks, negbins, posbins)
+                                     wf, masks, apo_masks, negbins, posbins)
             np.savetxt(path + 'combined_hist_{:d}.txt'.format(ii), pdf)
 
