@@ -73,18 +73,21 @@ def trap(f, dx):
 
 # basic settings
 use_mpi = True
-generate_pdfs = True
+generate_pdfs = False
 path = './outputs/'
 no_smooth = False
 alt_wf = True
 rve = False
+hi_res = True
 stub = ''
+if hi_res:
+	stub += '_hi_res'
 if no_smooth:
-	stub = '_no_smooth'
-if alt_wf:
-	stub = '_alt_wf'
+	stub += '_no_smooth'
+elif alt_wf:
+	stub += '_alt_wf'
 if rve:
-	stub = '_raise_val_err'
+	stub += '_raise_val_err'
 
 # set up MPI environment
 if use_mpi:
@@ -112,6 +115,14 @@ kBoltzmann = 1.38064852e-23
 frequency = 148e9 # Hertz
 gnu = mfunc.g(hPlanck * frequency / kBoltzmann / TCMB)
 y2tcmb = TCMB * gnu * 1.0e6
+
+# tSZ grids
+if hi_res:
+    n_grid_m = 50 * 5 # 3
+    n_grid_z = 51 * 5 # 3
+else:
+    n_grid_m = 50
+    n_grid_z = 51
 
 # experimental settings
 beam_fwhm_arcmin = 1.4
@@ -188,8 +199,8 @@ num_dict = {
     # The values here are reasonably conservative.
     'Npoints_theta': 1000,
     ###'Npoints_theta': 200, # IS THIS OKAY?
-    'Npoints_M': 50,
-    'Npoints_z': 51,
+    'Npoints_M': n_grid_m,
+    'Npoints_z': n_grid_z,
     
     # grid boundaries
     'logM_min': 11.,
