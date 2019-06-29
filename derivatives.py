@@ -73,13 +73,16 @@ def trap(f, dx):
 
 # basic settings
 use_mpi = True
-generate_pdfs = False
+generate_pdfs = True
 path = './outputs/'
+use_a_s = True
 no_smooth = False
 alt_wf = True
 rve = False
 hi_res = True
 stub = ''
+if use_a_s:
+	stub += '_a_s'
 if hi_res:
 	stub += '_hi_res'
 if no_smooth:
@@ -99,7 +102,7 @@ else:
     rank = 0
 
 # fiducial parameters
-# a_s_fid = 2.71826876e-09
+a_s_fid = 2.71826876e-09
 sig_8_fid = 0.7999741174575746
 om_m_fid = 0.25
 p_0_fid = 1.0
@@ -170,15 +173,25 @@ tot_c_l *= wf_c_l ** 2
 # calculate expected pixel variance
 tot_var = np.sum((2.0 * ell + 1.0) * tot_c_l) / 4.0 / np.pi
 
-# parameter combinations required for numerical derivatives (for 
-# sigma_8, omega_m and p_0)
-run_pars = np.array([[sig_8_fid, om_m_fid, p_0_fid, sig_n_fid], \
-                     [sig_8_fid * dm, om_m_fid, p_0_fid, sig_n_fid], \
-                     [sig_8_fid * dp, om_m_fid, p_0_fid, sig_n_fid], \
-                     [sig_8_fid, om_m_fid * dm, p_0_fid, sig_n_fid], \
-                     [sig_8_fid, om_m_fid * dp, p_0_fid, sig_n_fid], \
-                     [sig_8_fid, om_m_fid, p_0_fid * dm, sig_n_fid], \
-                     [sig_8_fid, om_m_fid, p_0_fid * dp, sig_n_fid]])
+# parameter combinations required for numerical derivatives.
+if use_a_s:
+	# a_s, omega_m and p_0...
+	run_pars = np.array([[a_s_fid, om_m_fid, p_0_fid, sig_n_fid], \
+	                     [a_s_fid * dm, om_m_fid, p_0_fid, sig_n_fid], \
+	                     [a_s_fid * dp, om_m_fid, p_0_fid, sig_n_fid], \
+	                     [a_s_fid, om_m_fid * dm, p_0_fid, sig_n_fid], \
+	                     [a_s_fid, om_m_fid * dp, p_0_fid, sig_n_fid], \
+	                     [a_s_fid, om_m_fid, p_0_fid * dm, sig_n_fid], \
+	                     [a_s_fid, om_m_fid, p_0_fid * dp, sig_n_fid]])
+else:
+	# or sigma_8, omega_m and p_0
+	run_pars = np.array([[sig_8_fid, om_m_fid, p_0_fid, sig_n_fid], \
+	                     [sig_8_fid * dm, om_m_fid, p_0_fid, sig_n_fid], \
+	                     [sig_8_fid * dp, om_m_fid, p_0_fid, sig_n_fid], \
+	                     [sig_8_fid, om_m_fid * dm, p_0_fid, sig_n_fid], \
+	                     [sig_8_fid, om_m_fid * dp, p_0_fid, sig_n_fid], \
+	                     [sig_8_fid, om_m_fid, p_0_fid * dm, sig_n_fid], \
+	                     [sig_8_fid, om_m_fid, p_0_fid * dp, sig_n_fid]])
 n_jobs = run_pars.shape[0]
 job_list = allocate_jobs(n_jobs, n_procs, rank)
 
@@ -256,7 +269,10 @@ if generate_pdfs:
 	    cos_par['OL0'] = 1.0 - cos_par['Om0'] #flat LCDM
 	    cos_par['Oc0'] = cos_par['Om0'] - cos_par['Ob0'] # CDM density
 	    cos_par['rhoM'] = cos_par['Om0'] * 2.7753e11
-	    cos_par['As'] = sigma_8_to_a_s(run_pars[i, 0], cos_par)
+	    if use_a_s:
+		    cos_par['As'] = run_pars[i, 0]
+	    else:
+		    cos_par['As'] = sigma_8_to_a_s(run_pars[i, 0], cos_par)
 
 	    # generate profiles
 	    path = './outputs/deriv_run_{:d}'.format(i) + stub + '_'
@@ -309,9 +325,11 @@ if rank == 0:
 			bins = np.append(bins, -bins[-2::-1])
 			dtcmb = bins[1] - bins[0]
 			noise_pdf = ss.norm.pdf(bins, 0.0, np.sqrt(tot_var))
-			i_cut = np.abs(bins) < 200.0
-			# @TODO: set cut limit to 690 to see if increasing 
-			# n_theta makes more extreme bins better behaved
+
+			# set cut limit to 690 to behaviour of more extreme 
+			# bins better behaved (which get smoothed into ACT
+			# range)
+			i_cut = np.abs(bins) < 690.0
 			bins_cut = bins[i_cut]
 
 		# extend to positive delta-T_CMB and convolve all but 
@@ -326,8 +344,6 @@ if rank == 0:
 			else:
 				conv = np.convolve(pdf, noise_pdf, mode='same')
 				pdfs.append(conv[i_cut] / trap(conv[i_cut], dtcmb))
-			#mp.semilogy(bins_cut, pdfs[-1])
-	#mp.show()
 
 	# alter smoothing for sigma_noise derivatives
 	if no_smooth:
@@ -344,7 +360,7 @@ if rank == 0:
 		pdf_plus = np.convolve(pdfs[0], noise_pdf, mode='same')
 		pdf_plus = pdf_plus[i_cut] / trap(pdf_plus[i_cut], dtcmb)
 
-	# derivatives: sigma_8, omega_m, p_0...
+	# derivatives: sigma_8/a_s, omega_m, p_0...
 	derivs = np.zeros((len(bins_cut), 4))
 	for i in range(3):
 		ii = 2 * i
@@ -357,15 +373,19 @@ if rank == 0:
 	for i in range(3):
 		deltas[:, i] = pdfs[2 * (i + 1)] / pdf_fid - 1.0
 	deltas[:, 3] = pdf_plus / pdf_fid - 1.0
-	if delta == 0.1:
+	if delta == 0.1 and not use_a_s:
 		deltas[:, 0] *= 0.1
 
 	# plots
 	cols = ['b', 'g', 'r', 'k']
-	labs = [r'\sigma_8', r'\Omega_m', r'P_0', r'\sigma_{\rm noise}']
+	if use_a_s:
+		labs = [r'A_s']
+	else:
+		labs = [r'\sigma_8']
+	labs += [r'\Omega_m', r'P_0', r'\sigma_{\rm noise}']
 	fig, axes = mp.subplots(1, 2, figsize=(16, 5))
 	for i in range(4):
-		if i == 0 and delta == 0.1:
+		if i == 0 and delta == 0.1 and not use_a_s:
 			axes[0].plot(bins_cut, deltas[:, i], cols[i], \
 						 label=r'$+\Delta '+labs[i]+r'(\times 0.1)$')
 		else:
@@ -380,7 +400,10 @@ if rank == 0:
 	axes[0].set_xlim(bins_cut[0], 0.0)
 	if no_smooth:
 		axes[0].legend(loc='lower left')
-		axes[0].set_ylim(-0.4, 0.4)
+		if use_a_s:
+			axes[0].set_ylim(-0.4, 2.0)
+		else:
+			axes[0].set_ylim(-0.4, 0.4)
 	else:
 		axes[0].legend(loc='upper left')
 		axes[0].set_ylim(np.min(deltas[bins_cut <= 0.0]) * 1.01, \
@@ -393,8 +416,6 @@ if rank == 0:
 	mp.savefig('./outputs/derivatives' + stub + '.pdf', \
 			   bbox_inches='tight')
 	mp.close()
-
-	exit()
 
 # p_0!
 # need to ensure sigma_8 doesn't change when we change omega_m!
@@ -434,4 +455,5 @@ if rank == 0:
 
 #  - am i using right pixel wf? using pre-calculated it seems
 #     + NO. @TODO: fix this.
+#  - and use smoothed WF!
 
