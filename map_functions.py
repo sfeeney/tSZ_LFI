@@ -114,24 +114,24 @@ def map_generate_final_map(numerics, cosmology, dndOmega, \
     
     # consistency checks#{{{
     if dndOmega.shape[0] != numerics['map_Npoints_M']:
-        print 'dndOmega mass problem'
-        print 'dndOmega has ' + str(dndOmega.shape[0]) + ' mass entries'
-        print 'while we have ' + str(numerics['map_Npints_M']) + ' mass grid points'
+        print('dndOmega mass problem')
+        print('dndOmega has ' + str(dndOmega.shape[0]) + ' mass entries')
+        print('while we have ' + str(numerics['map_Npints_M']) + ' mass grid points')
         return
     if dndOmega.shape[1] != numerics['map_Npoints_z']:
-        print 'dndOmega redshift problem'
-        print 'dndOmega has ' + str(dndOmega.shape[1]) + ' redshift entries'
-        print 'while we have ' + str(numerics['map_Npints_z']) + ' redshift grid points'
+        print('dndOmega redshift problem')
+        print('dndOmega has ' + str(dndOmega.shape[1]) + ' redshift entries')
+        print('while we have ' + str(numerics['map_Npints_z']) + ' redshift grid points')
         return
     if len(yprofiles) != numerics['map_Npoints_M']:
-        print 'yprofiles mass problem'
-        print 'yprofiles has ' + str(len(yprofiles)) + ' mass entries'
-        print 'while we have ' + str(numerics['map_Npoints_M']) + ' mass grid points'
+        print('yprofiles mass problem')
+        print('yprofiles has ' + str(len(yprofiles)) + ' mass entries')
+        print('while we have ' + str(numerics['map_Npoints_M']) + ' mass grid points')
         return
     if len(yprofiles[0]) != numerics['map_Npoints_z']:
-        print 'yprofiles redshift problem'
-        print 'yprofiles has ' + str(len(yprofiles[0])) + ' redshift entries'
-        print 'while we have ' + str(numerics['map_Npoints_z']) + ' redshift grid points'
+        print('yprofiles redshift problem')
+        print('yprofiles has ' + str(len(yprofiles[0])) + ' redshift entries')
+        print('while we have ' + str(numerics['map_Npoints_z']) + ' redshift grid points')
         return
     #}}}
 
@@ -160,7 +160,7 @@ def map_generate_final_map(numerics, cosmology, dndOmega, \
     # generate the tSZ signal
     for jj in xrange(numerics['map_Npoints_z']):
         if numerics['verbose'] :
-            print str(jj)
+            print(str(jj))
         start = time.time()
         if numerics['map_include_bias'] :
         # fo each redshift bin, compute one random realization of the overdensity field
@@ -212,8 +212,8 @@ def map_generate_final_map(numerics, cosmology, dndOmega, \
                 ext_map = throw_clusters(cluster_number, ext_map, this_map, central_pixels_x, central_pixels_y)
         end = time.time()
         if numerics['verbose'] :
-            print str((numerics['map_Npoints_z']-jj)*(end-start)/60.) + ' minutes remaining in map_generate_final_map'
-            print 'I am in index = ' + str(index)
+            print(str((numerics['map_Npoints_z']-jj)*(end-start)/60.) + ' minutes remaining in map_generate_final_map')
+            #print('I am in index = ' + str(index))
     
     '''
     # need to take a subset of the final map, since otherwise we're getting a bias (centres of clusters are currently always in the map)
@@ -269,7 +269,7 @@ def map_generate_final_map(numerics, cosmology, dndOmega, \
                          spare_pix_hor + numerics['map_width_pix']]
     end_total = time.time()
     if numerics['verbose'] :
-        print 'used ' + str((end_total - start_total)/60.) + ' minutes in total'
+        print('used ' + str((end_total - start_total)/60.) + ' minutes in total')
     return final_map
 
 #}}}
@@ -362,7 +362,7 @@ def map_get_powerspectrum(numerics, tSZ_map) :
     left_number = int(np.ceil((2**exponent - tSZ_map.shape[0])/2.))
     right_number = int(np.floor((2**exponent - tSZ_map.shape[0])/2.))
     tSZ_map = np.pad(tSZ_map, ((left_number, right_number), (left_number, right_number)), 'constant', constant_values = 0.)
-    print tSZ_map.shape
+    print(tSZ_map.shape)
     #plt.matshow(tSZ_map)
     #plt.show()
     Fmap = np.fft.ifft2(np.fft.fftshift(tSZ_map))

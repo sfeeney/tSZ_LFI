@@ -3,6 +3,16 @@ import os
 import pyDOE as pd
 import camb
 from camb import model, initialpower, get_matter_power_interpolator
+notk = False
+if 'DISPLAY' not in os.environ.keys():
+    notk = True
+elif os.environ['DISPLAY'] == ':0':
+    notk = True
+if notk:
+    import matplotlib
+    matplotlib.use('Agg')
+    print('using Agg')
+import matplotlib.pyplot as mp
 
 # MPI job allocation function
 def allocate_jobs(n_jobs, n_procs=1, rank=0):
@@ -10,7 +20,7 @@ def allocate_jobs(n_jobs, n_procs=1, rank=0):
     for i in range(n_procs):
         n_j_remain = n_jobs - n_j_allocated
         n_p_remain = n_procs - i
-        n_j_to_allocate = n_j_remain / n_p_remain
+        n_j_to_allocate = n_j_remain // n_p_remain
         if rank == i:
             return range(n_j_allocated, \
                          n_j_allocated + n_j_to_allocate)
@@ -167,7 +177,8 @@ numerical_parameters = {
 
     # ACT/LFI-specific settings
     'n_patch': 6,
-    'n_real': 56,
+    #'n_real': 56,
+    'n_real': 24,
 
     # parameter grids
     'sigma_8_ext': np.array([0.7, 0.9]),
@@ -207,7 +218,7 @@ if numerical_parameters['do_derivs']:
         if numerical_parameters['constrain']:
             seed = 231014
             np.random.seed(seed)
-        n_seeds = numerical_parameters['n_real'] / 2
+        n_seeds = numerical_parameters['n_real'] // 2
         seeds = 221216 + np.random.choice(231014 - 221216, \
                                           size=n_seeds, \
                                           replace=False)
@@ -312,15 +323,6 @@ if numerical_parameters['do_derivs']:
     from pixell import enmap
     import pickle
     import os
-    notk = False
-    if 'DISPLAY' not in os.environ.keys():
-            notk = True
-    elif os.environ['DISPLAY'] == ':0':
-            notk = True
-    if notk:
-        import matplotlib
-        matplotlib.use('Agg')
-    import matplotlib.pyplot as mp
 
 # cosmology-independent i/o & setup. first read in CMB C_ls
 cmb_ell, cmb_c_l = np.loadtxt('act/cmb_c_l_fiducial.txt', unpack=True)
@@ -577,7 +579,7 @@ if numerical_parameters['do_physics'] or \
                 
                 # report progress if desired
                 if numerical_parameters['verbose'] :
-                    print 'I am in index = ' + str(ii)
+                    print('I am in index = ' + str(ii))
                 
                 # generate a single tSZ map
                 # Note: the runtime of this function is dominated by the 
@@ -618,26 +620,31 @@ if numerical_parameters['do_physics'] or \
 
 # process histograms on master thread
 if numerical_parameters['do_derivs']:
-
-    # read all PDFs
-    pdfs = []
-    for ii in range(numerical_parameters['n_real']):
-        pdfs.append(np.genfromtxt(path + \
-                                  'combined_hist_{:d}.txt'.format(ii)))
-    pdfs = np.array(pdfs)
-
-    # calculate derivatives
-    derivs = np.zeros((pdfs.shape[0] / 2, pdfs.shape[1]))
-    for ii in range(numerical_parameters['n_real'] / 2):
-        derivs[ii] = (pdfs[2 * ii + 1, :] - pdfs[2 * ii, :]) / \
-                     (grid_locs[2 * ii + 1, 1] - grid_locs[2 * ii, 1])
-    mean_deriv = np.mean(derivs, axis=0)
-    std_deriv = np.std(derivs, axis=0)
-    mp.semilogy(bincenters, mean_deriv, color='b')
-    mp.semilogy(bincenters, -mean_deriv, color='b', ls=':')
-    mp.fill_between(bincenters, mean_deriv - std_deriv, \
-                    mean_deriv + std_deriv, alpha=0.5)
-    mp.xlabel(r'$T_{\rm CMB}\,[\mu{\rm K}]$')
-    mp.ylabel(r'$\partial p/\partial \Omega_{\rm m}$')
-    mp.savefig(path + 'omega_m_deriv.pdf', bbox_inches='tight')
+    
+    # ensure all previous calculations are finished prior to proceeding
+    if numerical_parameters['use_mpi']:
+        mpi.COMM_WORLD.Barrier()
+    if rank == 0:
+        
+        # read all PDFs
+        pdfs = []
+        for ii in range(numerical_parameters['n_real']):
+            pdfs.append(np.genfromtxt(path + \
+                                      'combined_hist_{:d}.txt'.format(ii)))
+        pdfs = np.array(pdfs)
+    
+        # calculate derivatives
+        derivs = np.zeros((pdfs.shape[0] / 2, pdfs.shape[1]))
+        for ii in range(numerical_parameters['n_real'] / 2):
+            derivs[ii] = (pdfs[2 * ii + 1, :] - pdfs[2 * ii, :]) / \
+                         (grid_locs[2 * ii + 1, 1] - grid_locs[2 * ii, 1])
+        mean_deriv = np.mean(derivs, axis=0)
+        std_deriv = np.std(derivs, axis=0)
+        mp.semilogy(bincenters, mean_deriv, color='b')
+        mp.semilogy(bincenters, -mean_deriv, color='b', ls=':')
+        mp.fill_between(bincenters, mean_deriv - std_deriv, \
+                        mean_deriv + std_deriv, alpha=0.5)
+        mp.xlabel(r'$T_{\rm CMB}\,[\mu{\rm K}]$')
+        mp.ylabel(r'$\partial p/\partial \Omega_{\rm m}$')
+        mp.savefig(path + 'omega_m_deriv.pdf', bbox_inches='tight')
 

@@ -206,12 +206,12 @@ def map_generate_dndOmega(numerics, cosmology):#{{{
                                 )
         end = time.time()
         if numerics['verbose'] :
-            print str((numerics['map_Npoints_M']-ii)*(end-start)/60.) + ' minutes remaining in map_generate_dndOmega'
+            print(str((numerics['map_Npoints_M']-ii)*(end-start)/60.) + ' minutes remaining in map_generate_dndOmega')
     return dndOmega
 #}}}
 def map_generate_bias(numerics, cosmology, path) :#{{{
     if numerics['verbose'] :
-        print 'Generating bias'
+        print('Generating bias')
     bias_arr = np.zeros((numerics['map_Npoints_M'], numerics['map_Npoints_z']))
     for ii in xrange(numerics['map_Npoints_M']) :
         for jj in xrange(numerics['map_Npoints_z']) :
@@ -247,7 +247,7 @@ def map_generate_yprofiles(numerics, cosmology):#{{{
             elif cosmology['r_out_def'] == '200':
                 r_out = numerics['theta_max_scale'] * r200
             else:
-                print 'Problem in r_out_def'
+                print('Problem in r_out_def')
                 return
             theta_out = np.arctan(r_out/d_A)
             yprof_inputs = {
@@ -265,7 +265,7 @@ def map_generate_yprofiles(numerics, cosmology):#{{{
             yprofiles[ii][jj] = y
         end = time.time()
         if numerics['verbose'] :
-            print str((numerics['map_Npoints_M']-ii)*(end-start)/60.) + ' minutes remaining in map_generate_yprofiles'
+            print(str((numerics['map_Npoints_M']-ii)*(end-start)/60.) + ' minutes remaining in map_generate_yprofiles')
     return thetas, yprofiles
 #}}}
 
@@ -277,7 +277,7 @@ def map_generate_linear_density_Cells(numerics, cosmology, path) :#{{{
     generates the Cells
     """
     if numerics['verbose'] :
-        print 'Generating linear density C_ell'
+        print('Generating linear density C_ell')
     lmin = int(numerics['ell_min_scale'] * np.pi / numerics['map_size'])
     lmax = int(numerics['ell_max_scale'] * np.pi / numerics['map_pixel_size'])
     ell_arr = np.arange(lmin, lmax)
