@@ -14,7 +14,8 @@ if notk:
     print('using Agg')
 import matplotlib.pyplot as mp
 
-# MPI job allocation function
+# MPI job allocation functions:
+# processes receive consecutive IDs
 def allocate_jobs(n_jobs, n_procs=1, rank=0):
     n_j_allocated = 0
     for i in range(n_procs):
@@ -25,6 +26,19 @@ def allocate_jobs(n_jobs, n_procs=1, rank=0):
             return range(n_j_allocated, \
                          n_j_allocated + n_j_to_allocate)
         n_j_allocated += n_j_to_allocate
+
+# processes receive non-consecutive IDs
+def allocate_jobs_nc(n_jobs, n_procs=1, rank=0):
+    jobs = []
+    if rank < n_jobs:
+        jobs = [rank]
+        while True:
+            next = jobs[-1] + n_procs
+            if next < n_jobs:
+                jobs.append(next)
+            else:
+                break
+    return jobs
 
 # a_s to sigma_8 calculation
 def a_s_to_sigma_8(cosmology_parameters):
@@ -82,17 +96,17 @@ numerical_parameters = {
     # set this to True if you want to generate dndOmega and the y-profiles
     # then some non-standard packages will be required
     # TODO
-    'do_physics': False,
+    'do_physics': True,
     
     # set this to true if you have already generated dndOmega and the y-profiles
     # then only maps can be generated using this data
     # TODO
-    'do_maps': False,
+    'do_maps': True,
     
     # set this to true if you have already generated maps
     # then only histograms can be generated using this data
     # TODO
-    'do_hists': False,
+    'do_hists': True,
     
     # set this to true if you want generate numerical derivatives
     'do_derivs': True,
@@ -178,7 +192,7 @@ numerical_parameters = {
     # ACT/LFI-specific settings
     'n_patch': 6,
     #'n_real': 56,
-    'n_real': 24,
+    'n_real': 72,
 
     # parameter grids
     'sigma_8_ext': np.array([0.7, 0.9]),
@@ -218,7 +232,7 @@ if numerical_parameters['do_derivs']:
         if numerical_parameters['constrain']:
             seed = 231014
             np.random.seed(seed)
-        n_seeds = numerical_parameters['n_real'] // 2
+        n_seeds = numerical_parameters['n_real'] // 8
         seeds = 221216 + np.random.choice(231014 - 221216, \
                                           size=n_seeds, \
                                           replace=False)
@@ -228,16 +242,16 @@ if numerical_parameters['do_derivs']:
         seeds = mpi.COMM_WORLD.bcast(seeds, root=0)
 
     # generate or read job list and corresponding parameter values
-    job_list = allocate_jobs(numerical_parameters['n_real'], n_procs, rank)
+    job_list = allocate_jobs_nc(numerical_parameters['n_real'], n_procs, rank)
     if numerical_parameters['do_physics']:
 
-        # generate simulation locations on latin hypercube
-        grid_locs = np.zeros((numerical_parameters['n_real'], 4))
+        # generate simulation locations for numerical derivs
+        fid_pars = np.array([0.7999741174575746, 0.25, 1.0, 1.0])
+        grid_locs = np.tile(fid_pars, (numerical_parameters['n_real'], 1))
         for i in range(numerical_parameters['n_real']):
-            grid_locs[i, :] = [0.7999741174575746, \
-                               0.25 * (1.0 + (-1) ** (i + 1 % 2) * \
-                               numerical_parameters['delta']), \
-                               1.0, 1.0]
+            mult = (1.0 + (-1) ** (i + 1 % 2) * 0.1)
+            i_par = (i % 8) // 2
+            grid_locs[i, i_par] *= mult
         if rank == 0:
             np.savetxt(path + 'par_grid.txt', grid_locs)
             np.savetxt(path + 'rand_seeds.txt', seeds, fmt='%d')
@@ -256,7 +270,7 @@ if numerical_parameters['do_derivs']:
                       ' requested in Python setup')
                 print('producing {:d} realisations'.format(n_real_file))
             numerical_parameters['n_real'] = n_real_file
-
+    
 else:
 
     # set up random seeds
@@ -369,7 +383,7 @@ if numerical_parameters['do_physics'] or \
 
         # set the appropriate seed if required
         if numerical_parameters['do_derivs']:
-            np.random.seed(seeds[ii / 2])
+            np.random.seed(seeds[ii / 8])
 
         # cosmology parameters #{{{
         cosmology_parameters = {
@@ -554,6 +568,12 @@ if numerical_parameters['do_physics'] or \
                                              cosmology_parameters)
             np.savez(path + 'yprofiles_{:d}.npz'.format(ii), \
                      thetas=thetas, yprofiles=yprofiles)
+            
+            # derivative calculation is set up so that each process 
+            # uses the same cosmology each time, so we no longer need
+            # to "do_physics"
+            if numerical_parameters['do_derivs']:
+                numerical_parameters['do_physics'] = False
 
 
         # produce maps and / or histograms
@@ -566,12 +586,16 @@ if numerical_parameters['do_physics'] or \
                         cosmology_parameters['kBoltzmann'] / \
                         cosmology_parameters['TCMB'])
 
-            # read in tSZ calculations
-            f = np.load(path + 'dndOmega_{:d}.npz'.format(ii))
-            dndOmega = f['dndOmega']
-            f = np.load(path + 'yprofiles_{:d}.npz'.format(ii))
-            thetas = f['thetas']
-            yprofiles = f['yprofiles']
+            # read in tSZ calculations if needed: no need to do so if 
+            # we're generating derivative sims *and* have just 
+            # "done_physics", as the cosmology is the same each time
+            if not numerical_parameters['do_derivs'] and \
+               not numerical_parameters['do_physics']:
+                f = np.load(path + 'dndOmega_{:d}.npz'.format(ii))
+                dndOmega = f['dndOmega']
+                f = np.load(path + 'yprofiles_{:d}.npz'.format(ii))
+                thetas = f['thetas']
+                yprofiles = f['yprofiles']
 
             # loop over patches per realisation
             tot_maps = []
@@ -634,17 +658,26 @@ if numerical_parameters['do_derivs']:
         pdfs = np.array(pdfs)
     
         # calculate derivatives
-        derivs = np.zeros((pdfs.shape[0] / 2, pdfs.shape[1]))
-        for ii in range(numerical_parameters['n_real'] / 2):
-            derivs[ii] = (pdfs[2 * ii + 1, :] - pdfs[2 * ii, :]) / \
-                         (grid_locs[2 * ii + 1, 1] - grid_locs[2 * ii, 1])
+        derivs = np.zeros((pdfs.shape[0] / 8, pdfs.shape[1], 4))
+        for ii in range(numerical_parameters['n_real'] / 8):
+            for jj in range(4):
+                i_minus = 8 * ii + 2 * jj
+                i_plus = i_minus + 1
+                derivs[ii, :, jj] = (pdfs[i_plus, :] - pdfs[i_minus, :]) / \
+                                    (grid_locs[i_plus, jj] - \
+                                     grid_locs[i_minus, jj])
         mean_deriv = np.mean(derivs, axis=0)
         std_deriv = np.std(derivs, axis=0)
-        mp.semilogy(bincenters, mean_deriv, color='b')
-        mp.semilogy(bincenters, -mean_deriv, color='b', ls=':')
-        mp.fill_between(bincenters, mean_deriv - std_deriv, \
-                        mean_deriv + std_deriv, alpha=0.5)
-        mp.xlabel(r'$T_{\rm CMB}\,[\mu{\rm K}]$')
-        mp.ylabel(r'$\partial p/\partial \Omega_{\rm m}$')
-        mp.savefig(path + 'omega_m_deriv.pdf', bbox_inches='tight')
+        labels = [r'\sigma_8', r'\Omega_{\rm m}', r'P_0', r'\sigma_{\rm noise}']
+        fig, axes = mp.subplots(2, 2, figsize=(16, 10))
+        for jj in range(4):
+            i_r = jj / 2
+            i_c = jj % 2
+            axes[i_r, i_c].semilogy(bincenters, mean_deriv[:, jj], color='b')
+            axes[i_r, i_c].semilogy(bincenters, -mean_deriv[:, jj], color='b', ls=':')
+            axes[i_r, i_c].fill_between(bincenters, mean_deriv[:, jj] - std_deriv[:, jj], \
+                            mean_deriv[:, jj] + std_deriv[:, jj], alpha=0.5)
+            axes[i_r, i_c].set_xlabel(r'$T_{\rm CMB}\,[\mu{\rm K}]$')
+            axes[i_r, i_c].set_ylabel(r'$\partial p/\partial ' + labels[jj] + '$')
+        mp.savefig(path + 'par_derivs.pdf', bbox_inches='tight')
 
